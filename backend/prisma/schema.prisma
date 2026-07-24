@@ -1,0 +1,211 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Role {
+  id    Int    @id
+  name  String @unique // e.g., "ADMIN", "USER", "MEMBER"
+  users User[]
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique // Auto-generated: excel_user_XXXXX
+  name         String
+  phone        String   @unique // Mobile number used for OTP
+  email        String?  
+  address      String?  @db.Text
+  profilePhoto String?  @db.LongText // Base64 profile photo field
+  passwordHash String?  // Optional hash, if admin allows password login or sets temp pass
+  status       String   @default("ACTIVE") // ACTIVE, SUSPENDED
+  roleId       Int
+  role         Role     @relation(fields: [roleId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  subscriptions     Subscription[]
+  payments          Payment[]
+  loginHistories    LoginHistory[]
+  activityLogs      ActivityLog[]
+  userNotifications UserNotification[]
+  employeeProfile   EmployeeProfile?
+  attendances       Attendance[]
+  userBookings      Booking[]          @relation("UserBookings")
+  healerBookings    Booking[]          @relation("HealerBookings")
+}
+
+model EmployeeProfile {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialization String   @default("Energy Healer") // e.g., Energy Healer, Meditation Guide, Volunteer
+  dutyStatus     String   @default("OFF_DUTY") // ON_DUTY, OFF_DUTY, ON_BREAK
+  availability   String?  @db.Text // JSON format weekly time slots
+  bio            String?  @db.Text
+  rating         Float    @default(5.0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Attendance {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checkIn   DateTime  @default(now())
+  checkOut  DateTime?
+  status    String    @default("PRESENT") // PRESENT, LATE, HALF_DAY
+  notes     String?   @db.Text
+  createdAt DateTime  @default(now())
+}
+
+model LiveSession {
+  id              Int      @id @default(autoincrement())
+  title           String
+  description     String?  @db.Text
+  hostName        String   @default("Master Energy Guide")
+  scheduledAt     DateTime
+  durationMinutes Int      @default(60)
+  meetingUrl      String   @db.Text
+  type            String   @default("HEALING") // HEALING, MEDITATION, WORKSHOP
+  status          String   @default("UPCOMING") // UPCOMING, LIVE, COMPLETED, CANCELLED
+  maxParticipants Int      @default(100)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Booking {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  user        User     @relation("UserBookings", fields: [userId], references: [id], onDelete: Cascade)
+  healerId    Int
+  healer      User     @relation("HealerBookings", fields: [healerId], references: [id], onDelete: Cascade)
+  sessionType String   @default("1-on-1 Distance Healing")
+  bookingDate DateTime
+  timeSlot    String
+  status      String   @default("CONFIRMED") // PENDING, CONFIRMED, COMPLETED, CANCELLED
+  amount      Float    @default(500.0)
+  paymentId   Int?
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model OTP {
+  id        Int      @id @default(autoincrement())
+  phone     String
+  code      String   // Hashed or plain OTP
+  isUsed    Boolean  @default(false)
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model Subscription {
+  id                   Int       @id @default(autoincrement())
+  userId               Int
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status               String    @default("ACTIVE") // ACTIVE, EXPIRED
+  amount               Float     @default(1500.0)
+  startDate            DateTime  @default(now())
+  endDate              DateTime
+  razorpayOrderId      String?
+  razorpaySubscriptionId String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  payments Payment[]
+}
+
+model Payment {
+  id                Int           @id @default(autoincrement())
+  userId            Int
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionId    Int?
+  subscription      Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  amount            Float
+  status            String        @default("PENDING") // PENDING, SUCCESS, FAILED, REFUNDED
+  razorpayOrderId   String        @unique
+  razorpayPaymentId String?       @unique
+  razorpaySignature String?
+  invoiceNumber     String?       @unique
+  refundReason      String?       @db.Text
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+model Notification {
+  id             Int       @id @default(autoincrement())
+  title          String
+  description    String    @db.Text
+  targetAudience String    @default("ALL") // ALL, PAID, UNPAID, SELECTED
+  status         String    @default("SENT") // SENT, SCHEDULED
+  scheduledAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  userNotifications UserNotification[]
+}
+
+model UserNotification {
+  id             Int          @id @default(autoincrement())
+  userId         Int
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationId Int
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  isRead         Boolean      @default(false)
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+}
+
+model ContactForm {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  phone     String
+  message   String   @db.Text
+  status    String   @default("UNREAD") // UNREAD, READ
+  createdAt DateTime @default(now())
+}
+
+model Settings {
+  id                Int      @id @default(1)
+  companyName       String   @default("Excel Energy")
+  gstNumber         String?
+  logo              String?  @db.Text
+  address           String?  @db.Text
+  email             String?
+  phone             String?
+  razorpayKeyId     String?
+  razorpayKeySecret String?
+  smsApiKey         String?
+  whatsappApiKey    String?
+  smtpHost          String?
+  smtpPort          Int?
+  smtpUser          String?
+  smtpPass          String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model LoginHistory {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress   String?
+  userAgent   String?
+  loggedInAt  DateTime  @default(now())
+  loggedOutAt DateTime?
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String   @db.Text
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
