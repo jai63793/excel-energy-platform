@@ -1876,15 +1876,24 @@ input, button {
         height: 0;
     }
     
+    .header-top {
+        background: #041712 !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    }
+    
     .site-header.scrolled .header-top {
-        background: rgba(255, 255, 255, 0.9);
+        background: #041712 !important;
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
-        border-bottom: 1px solid rgba(8, 50, 38, 0.08);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3) !important;
         margin-top: 0; /* Keep top row visible on mobile scroll */
         opacity: 1;
         pointer-events: auto;
+    }
+
+    .mobile-toggle span {
+        background-color: #ffffff !important;
     }
 
     /* Mobile Navigation Menu Backdrop Overlay */
@@ -1941,11 +1950,12 @@ input, button {
         right: -100%;
         width: 280px;
         height: 100vh;
-        background-color: #232323; /* Dark drawer matching navbar */
+        background-color: #041712 !important; /* Dark forest green drawer */
+        border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
         flex-direction: column;
         align-items: flex-start;
         padding: 100px 40px 40px 40px;
-        box-shadow: -10px 0 30px rgba(0, 0, 0, 0.25);
+        box-shadow: -10px 0 30px rgba(0, 0, 0, 0.3) !important;
         transition: var(--transition-normal);
         z-index: 100;
         gap: 24px;

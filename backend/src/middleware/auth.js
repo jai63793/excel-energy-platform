@@ -29,8 +29,8 @@ export const authenticateJWT = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'User account not found.' });
     }
 
-    if (user.status === 'SUSPENDED') {
-      return res.status(403).json({ success: false, message: 'Your account is suspended. Contact administrator.' });
+    if (user.status === 'SUSPENDED' || user.status === 'INACTIVE') {
+      return res.status(403).json({ success: false, message: 'Your account is inactive. Contact administrator.' });
     }
 
     // Attach user information to request

@@ -22,8 +22,28 @@ const app = express();
 app.use(helmet());
 
 // 2. Cross Origin Resource Sharing (CORS) Configuration
+const allowedOrigins = ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174'];
+const clientUrl = process.env.CLIENT_URL;
+
+if (clientUrl) {
+  const origins = clientUrl.split(',').map(o => o.trim());
+  origins.forEach(origin => {
+    allowedOrigins.push(origin);
+    if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
+      allowedOrigins.push(`https://${origin}`);
+      allowedOrigins.push(`http://${origin}`);
+    }
+  });
+}
+
 const corsOptions = {
-  origin: process.env.CLIENT_URL || ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174'],
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false); // Block origin without crashing the Node process
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
@@ -31,7 +51,12 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // 3. Payload and cookie processing parser
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ 
+  limit: '10mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
@@ -41,8 +66,15 @@ app.use('/api', apiRateLimiter);
 // Custom Request Logger Middleware
 app.use((req, res, next) => {
   console.log(`[HTTP] ${req.method} ${req.originalUrl}`);
-  if (req.method !== 'GET') {
-    console.log(`  Payload:`, JSON.stringify(req.body));
+  if (req.method !== 'GET' && req.body) {
+    const maskedBody = { ...req.body };
+    const sensitiveKeys = ['otpCode', 'otp', 'password', 'passwordHash', 'razorpay_signature'];
+    sensitiveKeys.forEach(key => {
+      if (maskedBody[key] !== undefined) {
+        maskedBody[key] = '******';
+      }
+    });
+    console.log(`  Payload:`, JSON.stringify(maskedBody));
   }
   next();
 });

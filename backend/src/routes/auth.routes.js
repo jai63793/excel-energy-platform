@@ -15,7 +15,8 @@ import {
   registerWithFirebase,
   forgotPasswordRequest,
   forgotPasswordReset,
-  testToggleSubscription
+  testToggleSubscription,
+  getGoogleMockUsers
 } from '../controllers/auth.controller.js';
 import { authenticateJWT } from '../middleware/auth.js';
 import { otpRateLimiter, loginRateLimiter } from '../middleware/rateLimit.js';
@@ -44,6 +45,7 @@ router.post('/login-otp', loginRateLimiter, validateOTPVerify, loginWithOTP);
 router.post('/register-password', validatePasswordRegister, registerWithPassword);
 router.post('/login-password', loginRateLimiter, validatePasswordLogin, loginWithPassword);
 router.post('/google', loginRateLimiter, validateGoogleAuth, googleAuth);
+router.get('/google-users', getGoogleMockUsers);
 router.post('/forgot-password-request', otpRateLimiter, validateForgotPasswordRequest, forgotPasswordRequest);
 router.post('/forgot-password-reset', loginRateLimiter, validateForgotPasswordReset, forgotPasswordReset);
 

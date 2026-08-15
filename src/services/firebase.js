@@ -12,27 +12,26 @@ const firebaseConfig = {
 
 let firebaseApp = null;
 let firebaseAuth = null;
-let isMock = true;
+let isMockMode = false;
 
-if (firebaseConfig.apiKey && firebaseConfig.apiKey !== 'your_api_key_here') {
+if (!firebaseConfig.apiKey || firebaseConfig.apiKey.includes('your_api_key')) {
+  console.warn('[Firebase] No API key detected. Using Mock Authentication mode.');
+  isMockMode = true;
+} else {
   try {
     firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     firebaseAuth = getAuth(firebaseApp);
-    isMock = false;
-    console.log('[Firebase] Live Auth Service initialized successfully.');
   } catch (error) {
-    console.error('[Firebase] Failed to initialize live Firebase:', error.message);
+    console.error('[Firebase] Failed to initialize real Firebase, using Mock Authentication mode:', error);
+    isMockMode = true;
   }
-} else {
-  console.log('[Firebase-MOCK] Initializing in mock mode.');
 }
 
-// Expose standard functions that route to either Real or Mock depending on config
+// Expose standard functions for Real Firebase setup
 export const initRecaptcha = (containerId) => {
-  if (isMock) {
-    console.log('[Firebase-MOCK] Initializing mock RecaptchaVerifier on:', containerId);
+  if (isMockMode) {
     return {
-      verify: () => Promise.resolve('mock_recaptcha_token'),
+      render: async () => 0,
       clear: () => {}
     };
   }
@@ -42,20 +41,17 @@ export const initRecaptcha = (containerId) => {
 };
 
 export const sendOTPWithFirebase = async (phoneNumber, appVerifier) => {
-  if (isMock) {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    console.log(`[Firebase-MOCK] Dispatching mock OTP for ${phoneNumber}: ${code}`);
+  if (isMockMode) {
+    console.log(`[Mock Firebase] Sending OTP to ${phoneNumber}`);
     return {
       isMock: true,
-      otp: code,
+      otp: '123456',
       confirm: async (enteredCode) => {
-        if (enteredCode === code || enteredCode === '123456') {
-          console.log('[Firebase-MOCK] Mock OTP code confirmed.');
+        if (enteredCode === '123456') {
           return {
             user: {
-              uid: 'mock_firebase_uid_' + phoneNumber.replace(/\D/g, ''),
-              phoneNumber: phoneNumber,
-              getIdToken: () => Promise.resolve(`mock_firebase_token_${phoneNumber.replace(/\D/g, '')}`)
+              phoneNumber,
+              getIdToken: async () => `mock-token-${phoneNumber}`
             }
           };
         } else {
@@ -64,7 +60,7 @@ export const sendOTPWithFirebase = async (phoneNumber, appVerifier) => {
       }
     };
   }
-  
+
   // Real Firebase call
   const confirmationResult = await realSignInWithPhoneNumber(firebaseAuth, phoneNumber, appVerifier);
   return {
@@ -75,3 +71,5 @@ export const sendOTPWithFirebase = async (phoneNumber, appVerifier) => {
     }
   };
 };
+
+

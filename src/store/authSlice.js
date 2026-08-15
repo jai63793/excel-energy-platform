@@ -62,7 +62,7 @@ export const loginWithOTPAction = (phone, otpCode) => async (dispatch) => {
         user: response.data.user,
         accessToken: response.data.accessToken
       }));
-      return { success: true };
+      return { success: true, role: response.data.user.role };
     }
   } catch (error) {
     const msg = error.response?.data?.message || 'Login verification failed.';
@@ -137,7 +137,7 @@ export const loginWithPasswordAction = (identifier, password) => async (dispatch
         user: response.data.user,
         accessToken: response.data.accessToken
       }));
-      return { success: true };
+      return { success: true, role: response.data.user.role };
     }
   } catch (error) {
     const msg = error.response?.data?.message || 'Login failed.';

@@ -9,7 +9,9 @@ async function main() {
   // 1. Create Roles
   const roles = [
     { id: 1, name: 'ADMIN' },
-    { id: 2, name: 'USER' }
+    { id: 2, name: 'USER' },
+    { id: 3, name: 'EMPLOYEE' },
+    { id: 4, name: 'VOLUNTEER' }
   ];
 
   for (const role of roles) {
@@ -19,7 +21,47 @@ async function main() {
       create: { id: role.id, name: role.name }
     });
   }
-  console.log('Roles seeded: ADMIN, USER');
+  console.log('Roles seeded: ADMIN, USER, EMPLOYEE, VOLUNTEER');
+
+  // Helper for robust user creation/upsertion (checks both phone and username uniqueness)
+  const upsertUserRobust = async ({ phone, username, name, email, passwordHash, roleId, status }) => {
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone },
+          { username }
+        ]
+      }
+    });
+
+    if (user) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          phone,
+          username,
+          name,
+          email,
+          passwordHash,
+          roleId,
+          status
+        }
+      });
+    } else {
+      user = await prisma.user.create({
+        data: {
+          username,
+          name,
+          phone,
+          email,
+          passwordHash,
+          roleId,
+          status
+        }
+      });
+    }
+    return user;
+  };
 
   // 2. Create Default Admin User
   const adminPhone = process.env.SEED_ADMIN_PHONE;
@@ -35,18 +77,14 @@ async function main() {
   const salt = await bcrypt.genSalt(10);
   const passwordHash = await bcrypt.hash(adminPassword, salt);
 
-  const adminUser = await prisma.user.upsert({
-    where: { phone: adminPhone },
-    update: {},
-    create: {
-      username: adminUsername,
-      name: 'Excel Energy Admin',
-      phone: adminPhone,
-      email: adminEmail,
-      passwordHash: passwordHash,
-      roleId: 1, // ADMIN
-      status: 'ACTIVE'
-    }
+  const adminUser = await upsertUserRobust({
+    phone: adminPhone,
+    username: adminUsername,
+    name: 'Excel Energy Admin',
+    email: adminEmail,
+    passwordHash: passwordHash,
+    roleId: 1, // ADMIN
+    status: 'ACTIVE'
   });
 
   // 3. Create Default System Settings if not exists
@@ -105,18 +143,14 @@ async function main() {
   const healerPasswordHash = await bcrypt.hash(seedHealerPassword, salt);
 
   // Demo Paid Subscriber
-  const paidUser = await prisma.user.upsert({
-    where: { phone: seedUserPhone },
-    update: {},
-    create: {
-      username: seedUserUsername,
-      name: 'Amit Patel',
-      phone: seedUserPhone,
-      email: seedUserEmail,
-      passwordHash: userPasswordHash,
-      roleId: 2,
-      status: 'ACTIVE'
-    }
+  const paidUser = await upsertUserRobust({
+    phone: seedUserPhone,
+    username: seedUserUsername,
+    name: 'Amit Patel',
+    email: seedUserEmail,
+    passwordHash: userPasswordHash,
+    roleId: 2,
+    status: 'ACTIVE'
   });
 
   const subEndDate = new Date();
@@ -152,33 +186,25 @@ async function main() {
   });
 
   // Demo Unpaid / Expired User
-  const unpaidUser = await prisma.user.upsert({
-    where: { phone: seedUnpaidUserPhone },
-    update: {},
-    create: {
-      username: seedUnpaidUserUsername,
-      name: 'Neha Singh',
-      phone: seedUnpaidUserPhone,
-      email: seedUnpaidUserEmail,
-      passwordHash: unpaidUserPasswordHash,
-      roleId: 2,
-      status: 'ACTIVE'
-    }
+  const unpaidUser = await upsertUserRobust({
+    phone: seedUnpaidUserPhone,
+    username: seedUnpaidUserUsername,
+    name: 'Neha Singh',
+    email: seedUnpaidUserEmail,
+    passwordHash: unpaidUserPasswordHash,
+    roleId: 2,
+    status: 'ACTIVE'
   });
 
   // Demo Energy Healer (Employee)
-  const healerUser = await prisma.user.upsert({
-    where: { phone: seedHealerPhone },
-    update: {},
-    create: {
-      username: seedHealerUsername,
-      name: 'Dr. Rajesh Iyer',
-      phone: seedHealerPhone,
-      email: seedHealerEmail,
-      passwordHash: healerPasswordHash,
-      roleId: 2,
-      status: 'ACTIVE'
-    }
+  const healerUser = await upsertUserRobust({
+    phone: seedHealerPhone,
+    username: seedHealerUsername,
+    name: 'Dr. Rajesh Iyer',
+    email: seedHealerEmail,
+    passwordHash: healerPasswordHash,
+    roleId: 3,
+    status: 'ACTIVE'
   });
 
   await prisma.employeeProfile.upsert({
@@ -188,7 +214,15 @@ async function main() {
       userId: healerUser.id,
       specialization: 'Advanced Pranic Healer',
       dutyStatus: 'ON_DUTY',
-      availability: 'Monday to Friday, 9 AM - 5 PM',
+      availability: JSON.stringify({
+        Monday: '09:00 AM - 05:00 PM',
+        Tuesday: '09:00 AM - 05:00 PM',
+        Wednesday: '09:00 AM - 05:00 PM',
+        Thursday: '09:00 AM - 05:00 PM',
+        Friday: '09:00 AM - 05:00 PM',
+        Saturday: '10:00 AM - 02:00 PM',
+        Sunday: 'Closed'
+      }),
       bio: 'Experienced healer with 15+ years of practice in energy scanning and aura balancing.',
       rating: 4.9
     }

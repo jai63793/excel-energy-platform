@@ -192,7 +192,7 @@
 
 .shared-gallery-card:hover .shared-gallery-card-img {
     transform: scale(1.08);
-    opacity: 0.35;
+    opacity: 1.0;
 }
 
 .shared-gallery-card-overlay {
@@ -208,11 +208,12 @@
     opacity: 0;
     transition: opacity var(--transition-normal);
     z-index: 2;
-    background: linear-gradient(to top, rgba(8, 50, 38, 0.9) 0%, rgba(8, 50, 38, 0) 100%);
+    background: transparent;
+    pointer-events: none;
 }
 
 .shared-gallery-card:hover .shared-gallery-card-overlay {
-    opacity: 1;
+    opacity: 0;
 }
 
 .shared-gallery-card-cat {

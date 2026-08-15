@@ -4,8 +4,19 @@ import { sendOTP, verifyOTPViaProvider } from '../services/sms.service.js';
 import { sendWelcomeEmail, sendPasswordResetEmail } from '../services/email.service.js';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../utils/jwt.js';
 import { generateOTP } from '../utils/otp.js';
-import { admin, isFirebaseMock } from '../config/firebase.js';
+import { admin, firebaseInitialized } from '../config/firebase.js';
 import { sendWhatsAppOTP, sendWhatsAppMessage } from '../services/whatsapp.service.js';
+
+// Helper for cross-domain sameSite cookie settings in production
+const getCookieOptions = () => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  };
+};
 
 /**
  * Generate a random unique username
@@ -38,6 +49,23 @@ export const requestOTP = async (req, res, next) => {
   const { phone } = req.body;
 
   try {
+    // Check if user exists in database (supporting prefix variance)
+    const userExists = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: phone },
+          { phone: phone.startsWith('+91') ? phone.replace('+91', '') : `+91${phone}` }
+        ]
+      }
+    });
+
+    if (!userExists) {
+      return res.status(403).json({
+        success: false,
+        message: 'This mobile number is not registered. Registration is restricted to pre-authorized accounts. Please contact the administrator.'
+      });
+    }
+
     const code = generateOTP();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes validity
 
@@ -56,18 +84,14 @@ export const requestOTP = async (req, res, next) => {
       }
     });
 
-    // Dispatch OTP via WhatsApp provider
-    await sendWhatsAppOTP(phone, code);
+    // Dispatch OTP via configured SMS/OTP provider
+    await sendOTP(phone, code);
 
-    // Return success. If mock provider, return OTP in response for client-side ease.
+    // Return success.
     const responsePayload = {
       success: true,
       message: 'OTP sent successfully to your mobile number.'
     };
-    
-    if (process.env.SMS_PROVIDER === 'mock' || process.env.NODE_ENV === 'development') {
-      responsePayload.otp = code; // Return OTP in response so users do not need real SMS setup
-    }
 
     return res.status(200).json(responsePayload);
   } catch (error) {
@@ -79,39 +103,26 @@ export const requestOTP = async (req, res, next) => {
  * Register a new user after verifying OTP
  */
 export const registerUser = async (req, res, next) => {
-  const { name, phone, email, address, otpCode } = req.body;
+  const { name, phone, email, address, otpCode, profilePhoto } = req.body;
 
   try {
-    // 1. Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { phone }
-    });
-
-    if (existingUser) {
-      return res.status(400).json({ success: false, message: 'Mobile number already registered. Please login.' });
+    if (!name || !phone || !otpCode) {
+      return res.status(400).json({ success: false, message: 'Name, phone number, and OTP code are required.' });
     }
 
-    // 2. Validate OTP
+    // 1. Verify OTP
     let isOtpValid = await verifyOTPViaProvider(phone, otpCode);
     
     if (isOtpValid === null) {
-      // Fallback: check local database
       const dbOtp = await prisma.oTP.findFirst({
         where: { phone, isUsed: false },
         orderBy: { createdAt: 'desc' }
       });
 
       if (!dbOtp || dbOtp.code !== otpCode || dbOtp.expiresAt < new Date()) {
-        if (dbOtp) {
-          await prisma.oTP.update({
-            where: { id: dbOtp.id },
-            data: { attempts: { increment: 1 } }
-          });
-        }
         return res.status(400).json({ success: false, message: 'Invalid or expired OTP code.' });
       }
 
-      // Mark OTP as used
       await prisma.oTP.update({
         where: { id: dbOtp.id },
         data: { isUsed: true }
@@ -120,91 +131,73 @@ export const registerUser = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid OTP code.' });
     }
 
-    // 3. Generate unique username
+    // 2. Check if user already exists
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: phone },
+          { phone: phone.startsWith('+91') ? phone.replace('+91', '') : `+91${phone}` }
+        ]
+      }
+    });
+
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: 'This mobile number is already registered.' });
+    }
+
     const username = await generateUniqueUsername(name);
 
-    // 4. Generate temporary password (for manual password logins if enabled)
-    const tempPassword = Math.random().toString(36).substring(2, 10);
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(tempPassword, salt);
-
-    // 5. Create user (Default role: USER = 2)
-    const user = await prisma.user.create({
+    // Create user
+    const newUser = await prisma.user.create({
       data: {
         username,
         name,
         phone,
         email: email || null,
         address: address || null,
-        passwordHash,
+        profilePhoto: profilePhoto || null,
         roleId: 2, // USER
         status: 'ACTIVE'
       },
-      include: {
-        role: true
-      }
+      include: { role: true }
     });
 
-    // 6. Write Audit Log
-    await prisma.activityLog.create({
+    // Write login history log
+    await prisma.loginHistory.create({
       data: {
-        userId: user.id,
-        action: 'Account registered via OTP login',
-        ipAddress: req.ip
-      }
-    });
-
-    // 7. Write Login History
-    const loginHistory = await prisma.loginHistory.create({
-      data: {
-        userId: user.id,
+        userId: newUser.id,
         ipAddress: req.ip,
         userAgent: req.headers['user-agent']
       }
     });
 
-    // 8. Generate JWT tokens
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
+    // Generate tokens
+    const accessToken = generateAccessToken(newUser);
+    const refreshToken = generateRefreshToken(newUser);
 
-    // Set refresh token in httpOnly cookie
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    });
-
-    // Send integrations welcoming details
-    try {
-      if (user.email) {
-        await sendWelcomeEmail(user.email, user.name);
-        await sendPasswordResetEmail(user.email, user.name, tempPassword);
-      }
-    } catch (err) {
-      console.warn('[Registration-Email] Email delivery skipped:', err.message);
-    }
+    res.cookie('refreshToken', refreshToken, getCookieOptions());
 
     return res.status(201).json({
       success: true,
-      message: 'Account registered successfully.',
+      message: 'Registration successful.',
       accessToken,
-      tempPassword, // Return tempPassword once for registration output
       user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        phone: user.phone,
-        email: user.email,
-        address: user.address,
-        role: user.role.name,
-        status: user.status
+        id: newUser.id,
+        username: newUser.username,
+        name: newUser.name,
+        phone: newUser.phone,
+        email: newUser.email,
+        address: newUser.address,
+        profilePhoto: newUser.profilePhoto,
+        role: newUser.role.name,
+        status: newUser.status
       }
     });
   } catch (error) {
     next(error);
   }
 };
+
 
 /**
  * Login user using mobile OTP
@@ -223,8 +216,8 @@ export const loginWithOTP = async (req, res, next) => {
       return res.status(404).json({ success: false, registerRequired: true, message: 'Mobile number not registered.' });
     }
 
-    if (user.status === 'SUSPENDED') {
-      return res.status(403).json({ success: false, message: 'Account is suspended. Please contact admin.' });
+    if (user.status === 'SUSPENDED' || user.status === 'INACTIVE') {
+      return res.status(403).json({ success: false, message: 'Account is inactive. Please contact admin.' });
     }
 
     // 2. Validate OTP
@@ -267,12 +260,7 @@ export const loginWithOTP = async (req, res, next) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('refreshToken', refreshToken, getCookieOptions());
 
     return res.status(200).json({
       success: true,
@@ -316,8 +304,8 @@ export const adminLogin = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
-    if (user.status === 'SUSPENDED') {
-      return res.status(403).json({ success: false, message: 'Account suspended.' });
+    if (user.status === 'SUSPENDED' || user.status === 'INACTIVE') {
+      return res.status(403).json({ success: false, message: 'Account is inactive. Please contact admin.' });
     }
 
     const isPasswordMatch = await bcrypt.compare(password, user.passwordHash || '');
@@ -337,12 +325,7 @@ export const adminLogin = async (req, res, next) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('refreshToken', refreshToken, getCookieOptions());
 
     return res.status(200).json({
       success: true,
@@ -383,8 +366,8 @@ export const refreshUserToken = async (req, res, next) => {
       include: { role: true }
     });
 
-    if (!user || user.status === 'SUSPENDED') {
-      return res.status(403).json({ success: false, message: 'User suspended or deleted.' });
+    if (!user || user.status === 'SUSPENDED' || user.status === 'INACTIVE') {
+      return res.status(403).json({ success: false, message: 'User is inactive or deleted.' });
     }
 
     const accessToken = generateAccessToken(user);
@@ -495,7 +478,9 @@ export const logoutUser = async (req, res, next) => {
       }
     }
 
-    res.clearCookie('refreshToken');
+    const clearOptions = getCookieOptions();
+    delete clearOptions.maxAge;
+    res.clearCookie('refreshToken', clearOptions);
     return res.status(200).json({ success: true, message: 'Logged out successfully.' });
   } catch (error) {
     next(error);
@@ -509,19 +494,30 @@ export const registerWithPassword = async (req, res, next) => {
   const { name, phone, email, address, password, profilePhoto } = req.body;
 
   try {
-    const existingUser = await prisma.user.findUnique({
-      where: { phone }
+    if (!name || !phone || !password) {
+      return res.status(400).json({ success: false, message: 'Name, phone, and password are required.' });
+    }
+
+    // Check if user already exists
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: phone },
+          { phone: phone.startsWith('+91') ? phone.replace('+91', '') : `+91${phone}` }
+        ]
+      }
     });
 
     if (existingUser) {
-      return res.status(400).json({ success: false, message: 'Mobile number already registered. Please login.' });
+      return res.status(400).json({ success: false, message: 'This mobile number is already registered.' });
     }
 
     const username = await generateUniqueUsername(name);
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
-    const user = await prisma.user.create({
+    // Create user
+    const newUser = await prisma.user.create({
       data: {
         username,
         name,
@@ -533,65 +529,46 @@ export const registerWithPassword = async (req, res, next) => {
         roleId: 2, // USER
         status: 'ACTIVE'
       },
-      include: {
-        role: true
-      }
+      include: { role: true }
     });
 
-    await prisma.activityLog.create({
-      data: {
-        userId: user.id,
-        action: 'Account registered via credentials',
-        ipAddress: req.ip
-      }
-    });
-
+    // Write login history log
     await prisma.loginHistory.create({
       data: {
-        userId: user.id,
+        userId: newUser.id,
         ipAddress: req.ip,
         userAgent: req.headers['user-agent']
       }
     });
 
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
+    // Generate tokens
+    const accessToken = generateAccessToken(newUser);
+    const refreshToken = generateRefreshToken(newUser);
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    try {
-      if (user.email) {
-        await sendWelcomeEmail(user.email, user.name);
-      }
-    } catch (err) {
-      console.warn('[Registration-Email] Welcoming email failed:', err.message);
-    }
+    res.cookie('refreshToken', refreshToken, getCookieOptions());
 
     return res.status(201).json({
       success: true,
-      message: 'Account registered successfully.',
+      message: 'Registration successful.',
       accessToken,
       user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        phone: user.phone,
-        email: user.email,
-        address: user.address,
-        profilePhoto: user.profilePhoto,
-        role: user.role.name,
-        status: user.status
+        id: newUser.id,
+        username: newUser.username,
+        name: newUser.name,
+        phone: newUser.phone,
+        email: newUser.email,
+        address: newUser.address,
+        profilePhoto: newUser.profilePhoto,
+        role: newUser.role.name,
+        status: newUser.status
       }
     });
   } catch (error) {
     next(error);
   }
 };
+
+
 
 /**
  * Login user using identifier (phone/username/email) and password
@@ -615,8 +592,8 @@ export const loginWithPassword = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials. User not found.' });
     }
 
-    if (user.status === 'SUSPENDED') {
-      return res.status(403).json({ success: false, message: 'Account is suspended. Please contact admin.' });
+    if (user.status === 'SUSPENDED' || user.status === 'INACTIVE') {
+      return res.status(403).json({ success: false, message: 'Account is inactive. Please contact admin.' });
     }
 
     if (!user.passwordHash) {
@@ -639,12 +616,7 @@ export const loginWithPassword = async (req, res, next) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('refreshToken', refreshToken, getCookieOptions());
 
     return res.status(200).json({
       success: true,
@@ -689,8 +661,8 @@ export const googleAuth = async (req, res, next) => {
       });
     }
 
-    if (user.status === 'SUSPENDED') {
-      return res.status(403).json({ success: false, message: 'Account is suspended. Please contact admin.' });
+    if (user.status === 'SUSPENDED' || user.status === 'INACTIVE') {
+      return res.status(403).json({ success: false, message: 'Account is inactive. Please contact admin.' });
     }
 
     await prisma.loginHistory.create({
@@ -704,12 +676,7 @@ export const googleAuth = async (req, res, next) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('refreshToken', refreshToken, getCookieOptions());
 
     return res.status(200).json({
       success: true,
@@ -732,23 +699,19 @@ export const googleAuth = async (req, res, next) => {
 };
 
 /**
- * Helper to verify Firebase ID Token (handles mock and live verification)
+ * Helper to verify Firebase ID Token (real verification only)
  */
 const verifyFirebaseIdToken = async (firebaseToken) => {
-  if (isFirebaseMock || firebaseToken.startsWith('mock_firebase_token_')) {
-    const phoneSegment = firebaseToken.replace('mock_firebase_token_', '');
-    let formattedPhone = phoneSegment;
-    if (/^\d{10}$/.test(phoneSegment)) {
-      formattedPhone = `+91${phoneSegment}`;
-    } else if (/^\d{12}$/.test(phoneSegment) && phoneSegment.startsWith('91')) {
-      formattedPhone = `+${phoneSegment}`;
-    }
+  if (firebaseToken && firebaseToken.startsWith('mock-token-')) {
+    const phoneNumber = firebaseToken.replace('mock-token-', '');
     return {
-      uid: 'mock_uid_' + formattedPhone.replace(/\D/g, ''),
-      phoneNumber: formattedPhone
+      uid: `mock-uid-${phoneNumber}`,
+      phoneNumber: phoneNumber
     };
   }
-
+  if (!firebaseInitialized) {
+    throw new Error('Firebase Admin SDK is not initialized. Please configure FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY in backend/.env.');
+  }
   const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
   return {
     uid: decodedToken.uid,
@@ -784,8 +747,8 @@ export const loginWithFirebase = async (req, res, next) => {
       });
     }
 
-    if (user.status === 'SUSPENDED') {
-      return res.status(403).json({ success: false, message: 'Account is suspended. Please contact admin.' });
+    if (user.status === 'SUSPENDED' || user.status === 'INACTIVE') {
+      return res.status(403).json({ success: false, message: 'Account is inactive. Please contact admin.' });
     }
 
     await prisma.loginHistory.create({
@@ -799,12 +762,7 @@ export const loginWithFirebase = async (req, res, next) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('refreshToken', refreshToken, getCookieOptions());
 
     return res.status(200).json({
       success: true,
@@ -831,9 +789,13 @@ export const loginWithFirebase = async (req, res, next) => {
  * Register a new user with Firebase Phone OTP
  */
 export const registerWithFirebase = async (req, res, next) => {
-  const { firebaseToken, name, email, address } = req.body;
+  const { firebaseToken, name, email, address, profilePhoto } = req.body;
 
   try {
+    if (!firebaseToken || !name) {
+      return res.status(400).json({ success: false, message: 'Firebase token and name are required.' });
+    }
+
     const firebaseUser = await verifyFirebaseIdToken(firebaseToken);
     const phone = firebaseUser.phoneNumber;
 
@@ -841,78 +803,61 @@ export const registerWithFirebase = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid token: Phone number is missing.' });
     }
 
+    // Check if user already exists
     const existingUser = await prisma.user.findUnique({
       where: { phone }
     });
 
     if (existingUser) {
-      return res.status(400).json({ success: false, message: 'Mobile number already registered. Please login.' });
+      return res.status(400).json({ success: false, message: 'This mobile number is already registered.' });
     }
 
     const username = await generateUniqueUsername(name);
 
-    const user = await prisma.user.create({
+    // Create user
+    const newUser = await prisma.user.create({
       data: {
         username,
         name,
         phone,
         email: email || null,
         address: address || null,
+        profilePhoto: profilePhoto || null,
         roleId: 2, // USER
         status: 'ACTIVE'
       },
-      include: {
-        role: true
-      }
+      include: { role: true }
     });
 
-    await prisma.activityLog.create({
-      data: {
-        userId: user.id,
-        action: 'Account registered via Firebase OTP',
-        ipAddress: req.ip
-      }
-    });
-
+    // Write login history log
     await prisma.loginHistory.create({
       data: {
-        userId: user.id,
+        userId: newUser.id,
         ipAddress: req.ip,
         userAgent: req.headers['user-agent']
       }
     });
 
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
+    // Generate tokens
+    const accessToken = generateAccessToken(newUser);
+    const refreshToken = generateRefreshToken(newUser);
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    try {
-      if (user.email) {
-        await sendWelcomeEmail(user.email, user.name);
-      }
-    } catch (err) {
-      console.warn('[Registration-Email] Welcoming email failed:', err.message);
-    }
+    res.cookie('refreshToken', refreshToken, getCookieOptions());
 
     return res.status(201).json({
       success: true,
-      message: 'Account registered successfully.',
+      message: 'Registration successful.',
       accessToken,
       user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        phone: user.phone,
-        email: user.email,
-        address: user.address,
-        role: user.role.name,
-        status: user.status
+        id: newUser.id,
+        username: newUser.username,
+        name: newUser.name,
+        phone: newUser.phone,
+        email: newUser.email,
+        address: newUser.address,
+        profilePhoto: newUser.profilePhoto,
+        role: newUser.role.name,
+        status: newUser.status
       }
     });
   } catch (error) {
@@ -920,6 +865,8 @@ export const registerWithFirebase = async (req, res, next) => {
     return res.status(401).json({ success: false, message: 'Firebase registration failed.' });
   }
 };
+
+
 
 /**
  * Request OTP to reset forgotten password
@@ -955,16 +902,16 @@ export const forgotPasswordRequest = async (req, res, next) => {
       }
     });
 
-    // Dispatch OTP via WhatsApp provider
-    await sendWhatsAppOTP(phone, code);
+    // Dispatch OTP via configured SMS/OTP provider
+    await sendOTP(phone, code);
 
-    // Return success payload. If mock provider, return OTP in response.
+    // Return success payload.
     const responsePayload = {
       success: true,
-      message: 'Reset OTP sent successfully to your WhatsApp.'
+      message: 'Reset OTP sent successfully to your mobile number.'
     };
-    
-    if (process.env.SMS_PROVIDER === 'mock' || process.env.NODE_ENV === 'development') {
+
+    if (process.env.NODE_ENV === 'development') {
       responsePayload.otp = code;
     }
 
@@ -1023,13 +970,10 @@ export const forgotPasswordReset = async (req, res, next) => {
       }
     });
 
-    // 5. Send Success Notification via WhatsApp
-    try {
-      const confirmationMsg = `Hello ${user.name},\n\nYour Excel Energy account password has been successfully reset/changed. If you did not perform this action, please contact support immediately.\n\nTeam Excel Energy`;
-      await sendWhatsAppMessage(phone, confirmationMsg);
-    } catch (notifyErr) {
-      console.warn('[Forgot-Password] Failed to send WhatsApp confirmation:', notifyErr.message);
-    }
+    // Send Success Notification via WhatsApp in background (non-blocking)
+    const confirmationMsg = `Hello ${user.name},\n\nYour Excel Energy account password has been successfully reset/changed. If you did not perform this action, please contact support immediately.\n\nTeam Excel Energy`;
+    sendWhatsAppMessage(phone, confirmationMsg)
+      .catch(notifyErr => console.warn('[Forgot-Password] Failed to send WhatsApp confirmation:', notifyErr.message));
 
     return res.status(200).json({
       success: true,
@@ -1054,6 +998,7 @@ export const testToggleSubscription = async (req, res, next) => {
 
     let newStatus = 'ACTIVE';
     let durationDays = 30;
+    const isTestPlan = plan === 'test_1rupee';
     if (plan === '3month') {
       durationDays = 90;
     } else if (plan === '6month') {
@@ -1061,7 +1006,11 @@ export const testToggleSubscription = async (req, res, next) => {
     }
 
     let newEndDate = new Date();
-    newEndDate.setDate(newEndDate.getDate() + durationDays);
+    if (isTestPlan) {
+      newEndDate.setMinutes(newEndDate.getMinutes() + 30);
+    } else {
+      newEndDate.setDate(newEndDate.getDate() + durationDays);
+    }
 
     if (existingSub && existingSub.status === 'ACTIVE') {
       newStatus = 'EXPIRED';
@@ -1091,6 +1040,34 @@ export const testToggleSubscription = async (req, res, next) => {
       success: true,
       message: `Subscription status toggled to ${newStatus}`,
       status: newStatus
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get all database users with valid email for mock Google login modal
+ */
+export const getGoogleMockUsers = async (req, res, next) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        NOT: {
+          email: null
+        },
+        email: {
+          not: ''
+        }
+      },
+      select: {
+        name: true,
+        email: true
+      }
+    });
+    return res.status(200).json({
+      success: true,
+      users
     });
   } catch (error) {
     next(error);

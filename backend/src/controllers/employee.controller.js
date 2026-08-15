@@ -1,4 +1,41 @@
 import prisma from '../config/db.js';
+import { sendWhatsAppBookingConfirmation } from '../services/whatsapp.service.js';
+
+/**
+ * Helper to check and automatically checkout stale check-in sessions (> 8 hours) for a user.
+ */
+export const checkAndCheckoutStaleSession = async (userId) => {
+  try {
+    const eightHoursAgo = new Date();
+    eightHoursAgo.setHours(eightHoursAgo.getHours() - 8);
+
+    const openAttendance = await prisma.attendance.findFirst({
+      where: { userId, checkOut: null, checkIn: { lte: eightHoursAgo } }
+    });
+
+    if (openAttendance) {
+      const autoCheckOutTime = new Date(openAttendance.checkIn.getTime() + 8 * 60 * 60 * 1000);
+      await prisma.attendance.update({
+        where: { id: openAttendance.id },
+        data: {
+          checkOut: autoCheckOutTime,
+          notes: openAttendance.notes 
+            ? `${openAttendance.notes} | Auto checkout after 8 hours` 
+            : 'Auto checkout after 8 hours'
+        }
+      });
+
+      await prisma.employeeProfile.update({
+        where: { userId },
+        data: { dutyStatus: 'OFF_DUTY' }
+      }).catch(() => {});
+      
+      console.log(`[Auto-Checkout] User ${userId} session auto checked out after 8 hours.`);
+    }
+  } catch (error) {
+    console.error(`[Auto-Checkout] Error checking stale session for user ${userId}:`, error);
+  }
+};
 
 /**
  * Get current employee profile & stats
@@ -6,6 +43,9 @@ import prisma from '../config/db.js';
 export const getEmployeeProfile = async (req, res, next) => {
   try {
     const userId = req.user.id;
+    
+    // Auto checkout if shift exceeds 8 hours
+    await checkAndCheckoutStaleSession(userId);
 
     let profile = await prisma.employeeProfile.findUnique({
       where: { userId },
@@ -109,6 +149,9 @@ export const checkInAttendance = async (req, res, next) => {
     const userId = req.user.id;
     const { notes } = req.body;
 
+    // Auto checkout if previous shift exceeds 8 hours and user forgot to checkout
+    await checkAndCheckoutStaleSession(userId);
+
     // Check if open check-in exists
     const openAttendance = await prisma.attendance.findFirst({
       where: { userId, checkOut: null }
@@ -197,6 +240,10 @@ export const checkOutAttendance = async (req, res, next) => {
 export const getAttendanceHistory = async (req, res, next) => {
   try {
     const userId = req.user.id;
+    
+    // Auto checkout if current active shift exceeds 8 hours
+    await checkAndCheckoutStaleSession(userId);
+
     const history = await prisma.attendance.findMany({
       where: { userId },
       orderBy: { checkIn: 'desc' },
@@ -248,8 +295,27 @@ export const updateBookingNotes = async (req, res, next) => {
       data: {
         ...(status && { status }),
         ...(notes !== undefined && { notes })
+      },
+      include: {
+        user: { select: { name: true, phone: true } },
+        healer: { select: { name: true } }
       }
     });
+
+    if (status === 'CONFIRMED' && updated.user?.phone) {
+      try {
+        await sendWhatsAppBookingConfirmation(
+          updated.user.phone,
+          updated.user.name,
+          updated.healer.name,
+          updated.sessionType,
+          new Date(updated.bookingDate).toLocaleDateString('en-IN'),
+          updated.timeSlot
+        );
+      } catch (waErr) {
+        console.warn('[Employee-Controller] WhatsApp alert warning:', waErr.message);
+      }
+    }
 
     return res.status(200).json({
       success: true,

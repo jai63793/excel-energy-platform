@@ -207,6 +207,8 @@ export default function JoinMember() {
             const orderRes = await api.post('/payments/create-order', { plan: selectedPlan.id });
             const { orderId, amount, currency, keyId } = orderRes.data;
 
+
+
             // 2. Open Razorpay checkout modal
             const options = {
                 key: keyId,

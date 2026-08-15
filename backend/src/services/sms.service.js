@@ -1,115 +1,230 @@
-import axios from 'axios';
 import dotenv from 'dotenv';
-import twilio from 'twilio';
+import axios from 'axios';
+import { sendWhatsAppOTP } from './whatsapp.service.js';
 
 dotenv.config();
 
-const provider = process.env.SMS_PROVIDER || 'mock';
+const smsProvider = process.env.SMS_PROVIDER || 'mock';
 
-// Initialize Twilio if credentials exist
-let twilioClient = null;
-if (provider === 'twilio' && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-  try {
-    twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  } catch (error) {
-    console.error('Failed to initialize Twilio client:', error.message);
-  }
-}
-
+/**
+ * Send SMS or template message using a configured service provider (like Scopycode)
+ * @param {string} phone - Target phone number
+ * @param {string} message - Message body content or template param (OTP)
+ * @param {string} code - The dynamic template parameter (e.g. OTP code)
+ */
 export const sendSMS = async (phone, message, code = null) => {
-  console.log(`[SMS-Service] Preparing to send to ${phone}: "${message}"`);
-  
-  if (provider === 'mock') {
-    console.log(`[SMS-MOCK] Message sent successfully to ${phone}.`);
+  console.log(`[SMS-Service] Preparing custom SMS for ${phone}...`);
+
+  if (smsProvider === 'mock') {
+    console.log(`[SMS-MOCK] SMS sent to ${phone}: "${message}"`);
     return { success: true, provider: 'mock' };
   }
 
-  if (provider === 'twilio') {
-    if (!twilioClient) {
-      console.warn('[SMS-Twilio] Twilio client not initialized. Falling back to console log.');
-      return { success: true, fallback: true };
+  if (smsProvider === 'scopycode') {
+    const apiKey = process.env.SCOPYCODE_API_KEY || 'NjiscqvVHXPItdQgm0WFwa3xY';
+    const licenseNumber = process.env.SCOPYCODE_LICENSE_NUMBER || '18002442321';
+    const templateId = process.env.SCOPYCODE_DLT_TEMPLATE_ID || 'verify_code5';
+    const apiURL = process.env.SCOPYCODE_SMS_URL || 'https://app.scopycode.in/api/sendtemplate.php';
+    const name = process.env.SCOPYCODE_SENDER_ID || 'Vikas';
+
+    if (!apiKey) {
+      console.warn('[SMS-Service] Scopycode SMS API Key is missing. Check your .env config.');
+      return { success: false, error: 'API key missing' };
     }
+
+    // Format phone to standard international format without '+' or spaces (e.g., 916379312193)
+    let cleanPhone = phone.replace(/[+\s-]/g, '');
+    if (cleanPhone.length === 10) {
+      cleanPhone = `91${cleanPhone}`;
+    }
+
     try {
-      // For general SMS, Twilio messages API is used. For OTP verification, twilio has Twilio Verify.
-      // We implement sending SMS message body.
-      const response = await twilioClient.messages.create({
-        body: message,
-        from: process.env.TWILIO_PHONE_NUMBER || '+12345678901', // configured or default
-        to: phone
-      });
-      return { success: true, messageId: response.sid, provider: 'twilio' };
+      // The Param must be in the format 'Vikas,OTP' (since the template expects name and code)
+      const dynamicOtp = code || message;
+      const paramValue = `${name},${dynamicOtp}`;
+
+      // Scopycode (Ampala Info Services) HTTP GET API URL parameter format matching PHP cURL:
+      const params = {
+        LicenseNumber: licenseNumber,
+        APIKey: apiKey,
+        Contact: cleanPhone,
+        Template: templateId,
+        Param: paramValue,
+        Name: name
+      };
+
+      console.log(`[SMS-Service] Requesting Scopycode Template API to ${apiURL} for ${cleanPhone}...`);
+      const maskedParams = { ...params };
+      if (maskedParams.Param) {
+        maskedParams.Param = `${name},******`;
+      }
+      console.log('[SMS-Service] Request query params:', JSON.stringify(maskedParams, null, 2));
+
+      const response = await axios.get(apiURL, { params });
+      console.log('[SMS-Service] Scopycode API Response:', response.data);
+      return { success: true, data: response.data, provider: 'scopycode' };
     } catch (error) {
-      console.error('[SMS-Twilio] Error sending SMS:', error.message);
-      throw error;
+      console.error('[SMS-Service] Scopycode Gateway error:', error.message);
+      return { success: false, error: error.message };
     }
   }
 
-  if (provider === 'msg91') {
-    const authKey = process.env.MSG91_AUTH_KEY;
-    if (!authKey) {
-      console.warn('[SMS-MSG91] MSG91 Auth Key missing. Falling back to log.');
-      return { success: true, fallback: true };
-    }
-    try {
-      const otpVal = code || message.match(/\b\d{6}\b/)?.[0] || '';
-      const response = await axios.post('https://api.msg91.com/api/v5/flow/', {
-        template_id: process.env.MSG91_TEMPLATE_ID || "your_template_id",
-        sender: process.env.MSG91_SENDER_ID || "EXCEL",
-        short_url: "0",
-        recipients: [
-          {
-            mobiles: phone.replace('+', ''),
-            message: message,
-            otp: otpVal,
-            code: otpVal
-          }
-        ]
-      }, {
-        headers: {
-          'authkey': authKey,
-          'content-type': 'application/json'
-        }
-      });
-      return { success: true, data: response.data, provider: 'msg91' };
-    } catch (error) {
-      console.error('[SMS-MSG91] Error sending SMS:', error.message);
-      throw error;
-    }
+  // Fallback to sending via WhatsApp if selected
+  if (smsProvider === 'whatsapp') {
+    const { sendWhatsAppMessage } = await import('./whatsapp.service.js');
+    return sendWhatsAppMessage(phone, message);
   }
 
-  return { success: false, error: 'Invalid SMS provider config' };
+  return { success: false, error: 'Unknown SMS provider configuration' };
 };
 
+/**
+ * Dispatch OTP verification codes
+ * @param {string} phone - Target phone number
+ * @param {string} code - The 6-digit verification code
+ */
 export const sendOTP = async (phone, code) => {
-  const message = `Your Excel Energy OTP is ${code}. It is valid for 5 minutes. Please do not share this code with anyone.`;
-  
-  if (provider === 'twilio' && process.env.TWILIO_VERIFY_SERVICE_SID && twilioClient) {
-    try {
-      // Use Twilio Verify service if SID is set
-      const verification = await twilioClient.verify.v2
-        .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-        .verifications.create({ to: phone, channel: 'sms' });
-      return { success: true, sid: verification.sid, provider: 'twilio-verify' };
-    } catch (error) {
-      console.warn('[SMS-TwilioVerify] Verify service failed, falling back to basic SMS:', error.message);
-      return sendSMS(phone, message, code);
-    }
+  console.log(`[SMS-Service] Generating OTP message to ${phone}...`);
+
+  // Standard fallback text
+  const otpMessage = `Your Excel Energy verification code is ${code}.`;
+
+  if (smsProvider === 'whatsapp') {
+    return sendWhatsAppOTP(phone, code);
   }
-  
-  return sendSMS(phone, message, code);
+
+  // Uses the sendSMS function above to dispatch, passing the code as template parameter
+  return sendSMS(phone, otpMessage, code);
 };
 
+/**
+ * Verification handler (local database handles the check, provider is just a delivery pipe)
+ */
 export const verifyOTPViaProvider = async (phone, code) => {
-  if (provider === 'twilio' && process.env.TWILIO_VERIFY_SERVICE_SID && twilioClient) {
+  return null; // Fallback to database validity verification
+};
+
+/**
+ * Dispatch YouTube Live stream link to paid subscribers
+ * @param {string} phone - Target phone number
+ * @param {string} userName - Subscriber's name
+ * @param {string} liveUrl - The YouTube Live URL
+ */
+export const sendLiveLinkSMS = async (phone, userName, liveUrl) => {
+  console.log(`[SMS-Service] Preparing YouTube Live stream link invitation for ${phone}...`);
+
+  if (smsProvider === 'mock') {
+    console.log(`[SMS-MOCK] Live Stream link sent to ${phone}: ${liveUrl}`);
+    return { success: true, provider: 'mock' };
+  }
+
+  if (smsProvider === 'scopycode') {
+    const apiKey = process.env.SCOPYCODE_API_KEY || 'NjiscqvVHXPItdQgm0WFwa3xY';
+    const licenseNumber = process.env.SCOPYCODE_LICENSE_NUMBER || '18002442321';
+    const templateId = process.env.SCOPYCODE_LIVE_TEMPLATE_ID || 'youtube_live_invite';
+    const apiURL = process.env.SCOPYCODE_SMS_URL || 'https://app.scopycode.in/api/sendtemplate.php';
+    const name = process.env.SCOPYCODE_SENDER_ID || 'Vikas';
+
+    // Format phone
+    let cleanPhone = phone.replace(/[+\s-]/g, '');
+    if (cleanPhone.length === 10) {
+      cleanPhone = `91${cleanPhone}`;
+    }
+
     try {
-      const verificationCheck = await twilioClient.verify.v2
-        .services(process.env.TWILIO_VERIFY_SERVICE_SID)
-        .verificationChecks.create({ to: phone, code: code });
-      return verificationCheck.status === 'approved';
+      // The template parameters are: Name, LiveURL (e.g. "Vikas,https://...")
+      const paramValue = `${name},${liveUrl}`;
+
+      const params = {
+        LicenseNumber: licenseNumber,
+        APIKey: apiKey,
+        Contact: cleanPhone,
+        Template: templateId,
+        Param: paramValue,
+        Name: name
+      };
+
+      console.log(`[SMS-Service] Requesting Scopycode Template API for Live Link to ${apiURL} for ${cleanPhone}...`);
+
+      const response = await axios.get(apiURL, { params });
+      console.log('[SMS-Service] Scopycode Live Link API Response:', response.data);
+      return { success: true, data: response.data, provider: 'scopycode' };
     } catch (error) {
-      console.warn('[SMS-TwilioVerify] Verification check failed, falling back to database OTP check:', error.message);
-      return null; // indicates to fallback to local DB verification
+      console.error('[SMS-Service] Scopycode Gateway error:', error.message);
+      return { success: false, error: error.message };
     }
   }
-  return null; // fallback
+
+  // Fallback to sending via WhatsApp if selected
+  if (smsProvider === 'whatsapp') {
+    const { sendWhatsAppYouTubeLive } = await import('./whatsapp.service.js');
+    return sendWhatsAppYouTubeLive(phone, userName, liveUrl);
+  }
+
+  return { success: false, error: 'Unknown SMS provider configuration' };
 };
+
+/**
+ * Dispatch Custom Admin Announcement to subscribers
+ * @param {string} phone - Target phone number
+ * @param {string} userName - Subscriber's name
+ * @param {string} title - Announcement title
+ * @param {string} description - Announcement message body
+ */
+export const sendBroadcastSMS = async (phone, userName, title, description) => {
+  console.log(`[SMS-Service] Preparing Bulk Broadcast SMS for ${phone}...`);
+
+  if (smsProvider === 'mock') {
+    console.log(`[SMS-MOCK] Bulk Broadcast sent to ${phone}: [${title}] ${description}`);
+    return { success: true, provider: 'mock' };
+  }
+
+  if (smsProvider === 'scopycode') {
+    const apiKey = process.env.SCOPYCODE_API_KEY || 'NjiscqvVHXPItdQgm0WFwa3xY';
+    const licenseNumber = process.env.SCOPYCODE_LICENSE_NUMBER || '18002442321';
+    const templateId = process.env.SCOPYCODE_BROADCAST_TEMPLATE_ID || 'admin_announcement';
+    const apiURL = process.env.SCOPYCODE_SMS_URL || 'https://app.scopycode.in/api/sendtemplate.php';
+    const name = process.env.SCOPYCODE_SENDER_ID || 'Vikas';
+
+    // Format phone
+    let cleanPhone = phone.replace(/[+\s-]/g, '');
+    if (cleanPhone.length === 10) {
+      cleanPhone = `91${cleanPhone}`;
+    }
+
+    try {
+      // The template parameters are: Name, Title, Description (e.g. "Vikas,Title,Description")
+      // Remove commas from title and description to prevent Scopycode parser confusion if they use comma-split
+      const cleanTitle = title.replace(/,/g, ' ');
+      const cleanDesc = description.replace(/,/g, ' ');
+      const paramValue = `${name},${cleanTitle},${cleanDesc}`;
+
+      const params = {
+        LicenseNumber: licenseNumber,
+        APIKey: apiKey,
+        Contact: cleanPhone,
+        Template: templateId,
+        Param: paramValue,
+        Name: name
+      };
+
+      console.log(`[SMS-Service] Requesting Scopycode Template API for Broadcast to ${apiURL} for ${cleanPhone}...`);
+
+      const response = await axios.get(apiURL, { params });
+      console.log('[SMS-Service] Scopycode Broadcast API Response:', response.data);
+      return { success: true, data: response.data, provider: 'scopycode' };
+    } catch (error) {
+      console.error('[SMS-Service] Scopycode Gateway error:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Fallback to sending via WhatsApp if selected
+  if (smsProvider === 'whatsapp') {
+    const { sendWhatsAppAdminAnnouncement } = await import('./whatsapp.service.js');
+    return sendWhatsAppAdminAnnouncement(phone, userName, title, description);
+  }
+
+  return { success: false, error: 'Unknown SMS provider configuration' };
+};
+

@@ -15,9 +15,9 @@ const getServiceImageUrl = (name) => {
 
 const PROGRAMS_GALLERY_IMAGES = [
     { src: getServiceImageUrl('advanced_physical_healing.png'), title: 'Advanced Physical Healing', category: 'Therapy', description: 'Treating chronic conditions using specialized color prana protocols.' },
-    { src: getServiceImageUrl('complex_psychological_healing.png'), title: 'Complex Psychotherapy', category: 'Psychotherapy', description: 'Deep emotional cleansing to resolve longstanding trauma.' },
-    { src: getServiceImageUrl('healing_for_businesses.png'), title: 'Corporate Alignment Room', category: 'Business', description: 'Cleansing group and organizational wellness energy fields.' },
-    { src: getServiceImageUrl('healing_for_profession.png'), title: 'Professional Effectiveness', category: 'Career', description: 'Charging vital throat and solar plexus chakras to restore clarity.' }
+    { src: getServiceImageUrl('complex_psychological_healing.png'), title: 'Complex Psychological Healing', category: 'Psychotherapy', description: 'Deep emotional cleansing to resolve longstanding trauma.' },
+    { src: getServiceImageUrl('healing_for_businesses.png'), title: 'Healing for Businesses', category: 'Business', description: 'Cleansing group and organizational wellness energy fields.' },
+    { src: getServiceImageUrl('healing_for_profession.png'), title: 'Healing for Profession', category: 'Career', description: 'Charging vital throat and solar plexus chakras to restore clarity.' }
 ];
 
 const TAB_HERO_DATA = {

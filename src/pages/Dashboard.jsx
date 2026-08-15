@@ -10,6 +10,81 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useSelector((state) => state.auth);
 
+  const renderNotificationDescription = (description) => {
+    if (!description) return null;
+    
+    // Regex to match the Link suffix: 🔗 (LinkLabel: )?(https?://\S+)
+    const regex = /🔗\s*(.*?):\s*(https?:\/\/\S+)/i;
+    const match = description.match(regex);
+    
+    if (match) {
+      const label = match[1] || 'Link';
+      const url = match[2];
+      // Get the text before the emoji
+      const textBefore = description.split(/🔗/)[0].trim();
+      
+      return (
+        <div>
+          {textBefore && <p style={{ fontSize: '0.82rem', color: '#555', lineHeight: '1.4', margin: '0 0 8px 0', whiteSpace: 'pre-line' }}>{textBefore}</p>}
+          <div style={{ marginTop: '8px', marginBottom: '8px' }}>
+            <a 
+              href={url} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                color: 'var(--color-accent)',
+                fontWeight: '600',
+                fontSize: '0.85rem',
+                textDecoration: 'underline'
+              }}
+            >
+              🔗 {label}
+            </a>
+          </div>
+        </div>
+      );
+    }
+    
+    // Regular URL regex fallback for any raw URLs inside the text
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts = description.split(urlRegex);
+    if (parts.length > 1) {
+      return (
+        <p style={{ fontSize: '0.82rem', color: '#555', lineHeight: '1.4', margin: '0 0 8px 0', whiteSpace: 'pre-line' }}>
+          {parts.map((part, index) => {
+            if (part.match(urlRegex)) {
+              return (
+                <a 
+                  key={index}
+                  href={part} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  style={{
+                    color: 'var(--color-accent)',
+                    fontWeight: '600',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  {part}
+                </a>
+              );
+            }
+            return part;
+          })}
+        </p>
+      );
+    }
+    
+    return (
+      <p style={{ fontSize: '0.82rem', color: '#555', lineHeight: '1.4', margin: '0 0 8px 0', whiteSpace: 'pre-line' }}>
+        {description}
+      </p>
+    );
+  };
+
   // Responsive state
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -25,6 +100,7 @@ export default function Dashboard() {
   const [daysRemaining, setDaysRemaining] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [totalPlanDays, setTotalPlanDays] = useState(30);
+  const [showPlanDetails, setShowPlanDetails] = useState(false);
 
   // Settings states
   const [name, setName] = useState(user?.name || '');
@@ -32,6 +108,15 @@ export default function Dashboard() {
   const [address, setAddress] = useState(user?.address || '');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+
+  // Healer Consultation Booking States
+  const [healersList, setHealersList] = useState([]);
+  const [myBookingsList, setMyBookingsList] = useState([]);
+  const [bookHealerId, setBookHealerId] = useState('');
+  const [bookSessionType, setBookSessionType] = useState('1-on-1 Distance Healing');
+  const [bookDate, setBookDate] = useState('');
+  const [bookTimeSlot, setBookTimeSlot] = useState('');
+  const [bookNotes, setBookNotes] = useState('');
 
   // Live video info
   const [liveUrl, setLiveUrl] = useState(null);
@@ -78,7 +163,6 @@ export default function Dashboard() {
 
   const loadDashboardDetails = async () => {
     try {
-      const profileRes = await api.get('/auth/me');
       const subRes = await api.get('/payments/my-history');
       setPayments(subRes.data.payments || []);
 
@@ -222,6 +306,16 @@ export default function Dashboard() {
 
   const loadRazorpayScript = () => {
     return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+      if (existingScript) {
+        existingScript.onload = () => resolve(true);
+        existingScript.onerror = () => resolve(false);
+        return;
+      }
       const script = document.createElement('script');
       script.src = 'https://checkout.razorpay.com/v1/checkout.js';
       script.onload = () => resolve(true);
@@ -243,6 +337,8 @@ export default function Dashboard() {
     try {
       const orderRes = await api.post('/payments/create-order', { plan: planId });
       const { orderId, amount, currency, keyId } = orderRes.data;
+
+
 
       const options = {
         key: keyId,
@@ -345,24 +441,87 @@ export default function Dashboard() {
     printWindow.document.close();
   };
 
-  const handleTestToggleSubscription = async () => {
-    toast.loading('Toggling subscription status...');
+  const loadHealersList = async () => {
     try {
-      const response = await api.put('/auth/test-toggle-subscription', { plan: dashPlan });
-      toast.dismiss();
+      const response = await api.get('/bookings/healers');
       if (response.data.success) {
-        toast.success(response.data.message);
-        loadDashboardDetails();
+        setHealersList(response.data.healers || []);
+      }
+    } catch (err) {
+      console.error('Failed to load healers list:', err.message);
+    }
+  };
+
+  const loadMyBookings = async () => {
+    try {
+      const response = await api.get('/bookings/my-bookings');
+      if (response.data.success) {
+        setMyBookingsList(response.data.bookings || []);
+      }
+    } catch (err) {
+      console.error('Failed to load user bookings:', err.message);
+    }
+  };
+
+  const handleCreateBooking = async (e) => {
+    e.preventDefault();
+    if (!bookHealerId || !bookDate || !bookTimeSlot) {
+      toast.error('Practitioner, Date, and Time Slot are required.');
+      return;
+    }
+
+    try {
+      toast.loading('Booking consultation...');
+      const response = await api.post('/bookings/create', {
+        healerId: Number(bookHealerId),
+        sessionType: bookSessionType,
+        bookingDate: bookDate,
+        timeSlot: bookTimeSlot,
+        notes: bookNotes
+      });
+      toast.dismiss();
+
+      if (response.data.success) {
+        toast.success('Consultation booked! Waiting for Admin assignment and Staff acceptance.');
+        // Reset form
+        setBookHealerId('');
+        setBookDate('');
+        setBookTimeSlot('');
+        setBookNotes('');
+        // Reload list
+        loadMyBookings();
       }
     } catch (err) {
       toast.dismiss();
-      toast.error('Failed to toggle subscription.');
+      toast.error(err.response?.data?.message || 'Failed to submit booking.');
+    }
+  };
+
+  const handleCancelBooking = async (bookingId) => {
+    if (!window.confirm('Are you sure you want to cancel this booking?')) return;
+
+    try {
+      toast.loading('Cancelling booking...');
+      const response = await api.put(`/bookings/${bookingId}/cancel`);
+      toast.dismiss();
+
+      if (response.data.success) {
+        toast.success('Booking cancelled successfully.');
+        loadMyBookings();
+      }
+    } catch (err) {
+      toast.dismiss();
+      toast.error(err.response?.data?.message || 'Failed to cancel booking.');
     }
   };
 
   const handleTabChange = (tabName) => {
     setActiveTab(tabName);
     setIsSidebarOpen(false); // Automatically dismiss drawer on mobile
+    if (tabName === 'bookings') {
+      loadHealersList();
+      loadMyBookings();
+    }
   };
 
   // Helper to render navigation items
@@ -446,7 +605,7 @@ export default function Dashboard() {
       </button>
 
       <button
-        onClick={() => handleTabChange('invoices')}
+        onClick={() => handleTabChange('payments')}
         style={{
           width: '100%',
           padding: '12px 16px',
@@ -455,13 +614,13 @@ export default function Dashboard() {
           textAlign: 'left',
           fontWeight: '600',
           fontSize: '0.9rem',
-          background: activeTab === 'invoices' ? 'var(--color-primary-light)' : 'none',
-          color: activeTab === 'invoices' ? 'var(--color-primary-medium)' : '#444',
+          background: activeTab === 'payments' ? 'var(--color-primary-light)' : 'none',
+          color: activeTab === 'payments' ? 'var(--color-primary-medium)' : '#444',
           cursor: 'pointer',
           transition: 'all 0.2s'
         }}
       >
-        📄 Payment Receipts & Invoices
+        💳 Payments & Subscription
       </button>
 
       <button
@@ -791,23 +950,6 @@ export default function Dashboard() {
                     <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--color-primary-dark)', margin: 0 }}>
                       {isSubscribed ? 'Active Subscriber' : 'Expired / Unpaid'}
                     </h3>
-                    <button
-                      type="button"
-                      onClick={handleTestToggleSubscription}
-                      style={{
-                        marginLeft: '12px',
-                        padding: '2px 8px',
-                        backgroundColor: '#edf2f0',
-                        border: '1px solid rgba(8, 50, 38, 0.15)',
-                        borderRadius: '4px',
-                        fontSize: '0.7rem',
-                        fontWeight: '600',
-                        color: 'var(--color-primary-medium)',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      [Test Toggle]
-                    </button>
                   </div>
                   <p style={{ fontSize: '0.8rem', color: '#666', margin: 0 }}>
                     {isSubscribed 
@@ -818,31 +960,11 @@ export default function Dashboard() {
                 </div>
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: isMobile ? '100%' : 'auto', alignItems: isMobile ? 'stretch' : 'flex-end' }}>
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '0.78rem', color: '#666', fontWeight: '600' }}>Plan:</span>
-                    <select 
-                      value={dashPlan} 
-                      onChange={(e) => setDashPlan(e.target.value)}
-                      style={{
-                        padding: '6px 10px',
-                        borderRadius: '6px',
-                        border: '1px solid rgba(8, 50, 38, 0.15)',
-                        fontSize: '0.8rem',
-                        fontWeight: '600',
-                        color: 'var(--color-primary-dark)',
-                        backgroundColor: '#fff',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <option value="1month">1 Month (₹1,500 + GST)</option>
-                      <option value="3month">3 Months (₹4,500 + GST)</option>
-                      <option value="6month">6 Months (₹9,000 + GST)</option>
-                    </select>
-                  </div>
-                  
                   <button
-                    onClick={() => handlePayment(dashPlan)}
-                    disabled={loadingPayment}
+                    onClick={() => {
+                      setShowPlanDetails(true);
+                      handleTabChange('payments');
+                    }}
                     style={{
                       background: !isSubscribed ? 'var(--color-accent)' : 'none',
                       border: !isSubscribed ? 'none' : '1.5px solid var(--color-primary-medium)',
@@ -855,7 +977,7 @@ export default function Dashboard() {
                       textAlign: 'center'
                     }}
                   >
-                    {loadingPayment ? 'Opening...' : !isSubscribed ? 'Subscribe Now' : 'Extend Duration'}
+                    {!isSubscribed ? 'Subscribe Now' : 'Extend Duration'}
                   </button>
                 </div>
               </div>
@@ -963,7 +1085,10 @@ export default function Dashboard() {
                         YouTube Live streaming classes are exclusive to active platform members.
                       </p>
                       <button
-                        onClick={handlePayment}
+                        onClick={() => {
+                          setShowPlanDetails(true);
+                          handleTabChange('payments');
+                        }}
                         style={{
                           background: 'var(--color-accent)',
                           color: '#fff',
@@ -1042,21 +1167,213 @@ export default function Dashboard() {
                 <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '14px', color: 'var(--color-primary-dark)' }}>
                   1-on-1 Energy Healer Consultations
                 </h2>
-                <p style={{ color: '#666', fontSize: '0.85rem', marginBottom: '20px', lineHeight: '1.5' }}>
-                  Schedule private energy balancing and healing sessions with our certified practitioners.
+                <p style={{ color: '#666', fontSize: '0.85rem', marginBottom: '30px', lineHeight: '1.5' }}>
+                  Schedule private energy balancing and healing sessions. Book a slot, and the admin will assign and confirm your healer.
                 </p>
-                <div style={{ border: '1px dashed rgba(8, 50, 38, 0.2)', borderRadius: '12px', padding: '30px 16px', textAlign: 'center', background: '#fafbfa' }}>
-                  <span style={{ fontSize: '2.2rem', display: 'block', marginBottom: '10px' }}>🗓️</span>
-                  <h4 style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)', marginBottom: '6px', fontSize: '1rem' }}>Consultations Booking Coming Soon</h4>
-                  <p style={{ fontSize: '0.8rem', color: '#777', maxWidth: '360px', margin: '0 auto 16px auto', lineHeight: '1.4' }}>
-                    We are currently integrating healer appointment calendars. You will soon be able to choose date and time slots directly.
-                  </p>
-                  <button 
-                    onClick={() => handleTabChange('overview')}
-                    style={{ background: 'var(--color-primary-medium)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '0.85rem' }}
-                  >
-                    Return to Overview
-                  </button>
+
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '30px', alignItems: 'start' }}>
+                  {/* Left Side: Booking Form */}
+                  <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', border: '1px solid #edf2f0' }}>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--color-primary-dark)', marginBottom: '20px', borderBottom: '1px solid #edf2f0', paddingBottom: '8px' }}>
+                      Schedule New Session
+                    </h3>
+                    
+                    <form onSubmit={handleCreateBooking}>
+                      <div style={{ marginBottom: '16px' }}>
+                        <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 'bold', marginBottom: '6px', color: '#555' }}>
+                          Select practitioner (Desired)
+                        </label>
+                        <select
+                          value={bookHealerId}
+                          onChange={(e) => setBookHealerId(e.target.value)}
+                          required
+                          style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '0.88rem', background: '#fff', outline: 'none' }}
+                        >
+                          <option value="">-- Choose practitioner --</option>
+                          {healersList.map(h => (
+                            <option key={h.id} value={h.id}>
+                              {h.name} ({h.employeeProfile?.specialization || 'Energy Healer'})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div style={{ marginBottom: '16px' }}>
+                        <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 'bold', marginBottom: '6px', color: '#555' }}>
+                          Session Type
+                        </label>
+                        <select
+                          value={bookSessionType}
+                          onChange={(e) => setBookSessionType(e.target.value)}
+                          required
+                          style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '0.88rem', background: '#fff', outline: 'none' }}
+                        >
+                          <option value="1-on-1 Distance Healing">1-on-1 Distance Healing</option>
+                          <option value="Pranic Psychotherapy Session">Pranic Psychotherapy Session</option>
+                          <option value="Crystal Healing Balancing">Crystal Healing Balancing</option>
+                          <option value="Meditation & Yoga Consultation">Meditation & Yoga Consultation</option>
+                        </select>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 'bold', marginBottom: '6px', color: '#555' }}>
+                            Booking Date
+                          </label>
+                          <input
+                            type="date"
+                            value={bookDate}
+                            onChange={(e) => setBookDate(e.target.value)}
+                            required
+                            min={new Date().toISOString().split('T')[0]}
+                            style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '0.88rem', outline: 'none' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 'bold', marginBottom: '6px', color: '#555' }}>
+                            Preferred Time Slot
+                          </label>
+                          <select
+                            value={bookTimeSlot}
+                            onChange={(e) => setBookTimeSlot(e.target.value)}
+                            required
+                            style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '0.88rem', background: '#fff', outline: 'none' }}
+                          >
+                            <option value="">-- Choose Slot --</option>
+                            <option value="09:00 AM - 10:00 AM">09:00 AM - 10:00 AM</option>
+                            <option value="11:00 AM - 12:00 PM">11:00 AM - 12:00 PM</option>
+                            <option value="02:00 PM - 03:00 PM">02:00 PM - 03:00 PM</option>
+                            <option value="04:00 PM - 05:00 PM">04:00 PM - 05:00 PM</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div style={{ marginBottom: '20px' }}>
+                        <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 'bold', marginBottom: '6px', color: '#555' }}>
+                          Healing Request Notes
+                        </label>
+                        <textarea
+                          placeholder="Please briefly explain any physical / emotional issues you want the session to focus on..."
+                          value={bookNotes}
+                          onChange={(e) => setBookNotes(e.target.value)}
+                          rows={3}
+                          style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '0.88rem', outline: 'none', resize: 'none', fontFamily: 'inherit' }}
+                        />
+                      </div>
+
+
+                      <button
+                        type="submit"
+                        style={{
+                          width: '100%',
+                          padding: '12px',
+                          background: 'var(--color-primary-medium)',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '6px',
+                          fontWeight: '700',
+                          fontSize: '0.9rem',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 10px rgba(12, 71, 55, 0.15)'
+                        }}
+                      >
+                        Book Consultation Slot
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Right Side: Active Bookings */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--color-primary-dark)', marginBottom: '0px' }}>
+                      Your Scheduled Bookings
+                    </h3>
+
+                    {myBookingsList.length === 0 ? (
+                      <div style={{ padding: '40px 10px', textAlign: 'center', color: '#999', fontSize: '0.9rem', border: '1.5px dashed #edf2f0', borderRadius: '12px', background: '#fafbfa' }}>
+                        No scheduled bookings found. Use the form to book your first session.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                        {myBookingsList.map((b) => (
+                          <div
+                            key={b.id}
+                            style={{
+                              background: '#fff',
+                              border: '1px solid #edf2f0',
+                              borderRadius: '12px',
+                              padding: '20px',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                              <div>
+                                <span style={{ fontSize: '0.72rem', color: '#999', display: 'block', textTransform: 'uppercase', fontWeight: 'bold' }}>
+                                  Booking ID #{b.id}
+                                </span>
+                                <h4 style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)', margin: '2px 0 0 0', fontSize: '1rem' }}>
+                                  {b.sessionType}
+                                </h4>
+                              </div>
+                              <span style={{
+                                backgroundColor:
+                                  b.status === 'CONFIRMED' ? '#dcfce7' :
+                                  b.status === 'PENDING' ? '#fef3c7' :
+                                  b.status === 'COMPLETED' ? '#dbeafe' : '#fee2e2',
+                                color:
+                                  b.status === 'CONFIRMED' ? '#15803d' :
+                                  b.status === 'PENDING' ? '#b45309' :
+                                  b.status === 'COMPLETED' ? '#1e40af' : '#b91c1c',
+                                padding: '3px 8px',
+                                borderRadius: '12px',
+                                fontSize: '0.75rem',
+                                fontWeight: 'bold'
+                              }}>
+                                {b.status}
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '0.85rem', marginBottom: '14px', color: '#555' }}>
+                              <div>
+                                <strong>Date:</strong> {new Date(b.bookingDate).toLocaleDateString('en-IN')}
+                              </div>
+                              <div>
+                                <strong>Time:</strong> {b.timeSlot}
+                              </div>
+                              <div style={{ gridColumn: 'span 2' }}>
+                                <strong>Healer:</strong> {b.healer?.name || 'Waiting for Admin allocation'}
+                              </div>
+                              {b.notes && (
+                                <div style={{ gridColumn: 'span 2', fontSize: '0.8rem', color: '#777', borderTop: '1px solid #f5f5f5', paddingTop: '8px', marginTop: '4px' }}>
+                                  <strong>Notes:</strong> {b.notes}
+                                </div>
+                              )}
+                            </div>
+
+                            {(b.status === 'PENDING' || b.status === 'CONFIRMED') && (
+                              <button
+                                onClick={() => handleCancelBooking(b.id)}
+                                style={{
+                                  background: 'none',
+                                  border: '1.5px solid #fee2e2',
+                                  color: '#dc2626',
+                                  padding: '6px 12px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.8rem',
+                                  fontWeight: '600',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#fee2e2'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                              >
+                                Cancel Session
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -1125,9 +1442,7 @@ export default function Dashboard() {
                         <h4 style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)', marginBottom: '4px', fontSize: '0.95rem', paddingRight: '80px' }}>
                           {n.notification.title}
                         </h4>
-                        <p style={{ fontSize: '0.82rem', color: '#555', lineHeight: '1.4', margin: '0 0 8px 0' }}>
-                          {n.notification.description}
-                        </p>
+                        {renderNotificationDescription(n.notification.description)}
                         <span style={{ fontSize: '0.72rem', color: '#999', display: 'block' }}>
                           📅 {new Date(n.createdAt).toLocaleString()}
                         </span>
@@ -1138,13 +1453,212 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* INVOICES PANEL */}
-            {activeTab === 'invoices' && (
+            {/* PAYMENTS & SUBSCRIPTION PANEL */}
+            {activeTab === 'payments' && (
               <div>
                 <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)', marginBottom: '20px', color: 'var(--color-primary-dark)' }}>
-                  Billing History & GST Invoices
+                  Payments & Subscription
                 </h2>
-                
+
+                {/* Status and Details Row */}
+                <div style={{
+                  background: '#fff',
+                  borderRadius: '12px',
+                  padding: '24px',
+                  border: '1.5px solid #edf2f0',
+                  marginBottom: '30px',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.02)'
+                }}>
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: isMobile ? 'column' : 'row',
+                    alignItems: isMobile ? 'flex-start' : 'center',
+                    justifyContent: 'space-between',
+                    paddingBottom: showPlanDetails ? '20px' : '0px',
+                    borderBottom: showPlanDetails ? '1px solid #edf2f0' : 'none',
+                    marginBottom: showPlanDetails ? '20px' : '0px',
+                    gap: '16px',
+                    width: '100%'
+                  }}>
+                    <div>
+                      <span style={{ fontSize: '0.78rem', color: '#777', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        MEMBERSHIP STATUS
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '6px 0' }}>
+                        <span style={{
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          backgroundColor: isSubscribed ? '#22c55e' : '#ef4444'
+                        }} />
+                        <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--color-primary-dark)', margin: 0 }}>
+                          {isSubscribed ? 'Active Subscriber' : 'Expired / Unpaid'}
+                        </h3>
+                      </div>
+                      <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>
+                        {isSubscribed 
+                          ? `Your membership is active and valid until ${new Date(subscription?.endDate).toLocaleDateString('en-IN')}`
+                          : 'Renew your membership to access all live guided meditation sessions and healer discounts.'
+                        }
+                      </p>
+                    </div>
+
+                    {!showPlanDetails && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPlanDetails(true)}
+                        style={{
+                          background: 'var(--color-accent)',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '6px',
+                          padding: '12px 24px',
+                          fontWeight: '700',
+                          fontSize: '0.88rem',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 12px rgba(251, 191, 36, 0.2)',
+                          transition: 'all 0.2s',
+                          alignSelf: isMobile ? 'stretch' : 'center'
+                        }}
+                      >
+                        {!isSubscribed ? '💳 Subscribe Now' : '🔄 Extend / Renew'}
+                      </button>
+                    )}
+                  </div>
+
+                  {showPlanDetails && (
+                    <div style={{
+                      animation: 'fadeIn 0.3s ease-in-out'
+                    }}>
+                      <h4 style={{
+                        fontSize: '1.05rem',
+                        fontWeight: '700',
+                        color: 'var(--color-primary-dark)',
+                        marginBottom: '16px'
+                      }}>
+                        Select Subscription Plan
+                      </h4>
+
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
+                        gap: '16px',
+                        marginBottom: '24px'
+                      }}>
+                        {[
+                          { id: '1month', name: '1 Month Plan', price: '₹1,500', total: '₹1,770', duration: '30 Days', desc: 'Twin Hearts meditation & live streams' },
+                          { id: '3month', name: '3 Months Plan', price: '₹4,500', total: '₹5,310', duration: '90 Days', desc: 'Extended regular guidance & support', popular: true },
+                          { id: '6month', name: '6 Months Plan', price: '₹9,000', total: '₹10,620', duration: '180 Days', desc: 'Premium access & maximum benefits' }
+                        ].map((plan) => {
+                          const isSelected = dashPlan === plan.id;
+                          return (
+                            <div
+                              key={plan.id}
+                              onClick={() => setDashPlan(plan.id)}
+                              style={{
+                                background: isSelected ? 'rgba(12, 71, 55, 0.03)' : '#fff',
+                                border: isSelected ? '2px solid var(--color-primary-medium)' : '1px solid rgba(8, 50, 38, 0.12)',
+                                borderRadius: '10px',
+                                padding: '20px 16px',
+                                cursor: 'pointer',
+                                position: 'relative',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                textAlign: 'center',
+                                boxShadow: isSelected ? '0 6px 16px rgba(12, 71, 55, 0.08)' : 'none',
+                                transform: isSelected ? 'scale(1.02)' : 'scale(1)',
+                                transition: 'all 0.2s ease-in-out'
+                              }}
+                            >
+                              {plan.popular && (
+                                <span style={{
+                                  position: 'absolute',
+                                  top: '-10px',
+                                  background: 'var(--color-accent)',
+                                  color: '#fff',
+                                  padding: '2px 10px',
+                                  borderRadius: '12px',
+                                  fontSize: '0.65rem',
+                                  fontWeight: '700',
+                                  textTransform: 'uppercase',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                                }}>
+                                  Best Value
+                                </span>
+                              )}
+                              <span style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--color-primary-dark)', marginBottom: '6px' }}>
+                                {plan.name}
+                              </span>
+                              <span style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--color-primary-medium)', margin: '4px 0' }}>
+                                {plan.price}
+                              </span>
+                              <span style={{ fontSize: '0.75rem', color: '#666', marginBottom: '8px' }}>
+                                {plan.noGstLabel ? 'Inclusive of GST' : `+ 18% GST (Total: ${plan.total})`}
+                              </span>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '4px 10px',
+                                backgroundColor: isSelected ? 'var(--color-primary-light)' : '#f5f7f6',
+                                color: 'var(--color-primary-medium)',
+                                borderRadius: '12px',
+                                fontSize: '0.78rem',
+                                fontWeight: '600',
+                                marginTop: 'auto'
+                              }}>
+                                ⏳ {plan.duration} Validity
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowPlanDetails(false)}
+                          style={{
+                            background: 'none',
+                            border: '1.5px solid #dcdfdc',
+                            color: '#666',
+                            borderRadius: '6px',
+                            padding: '10px 20px',
+                            fontWeight: '600',
+                            fontSize: '0.85rem',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          Close Details
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePayment(dashPlan)}
+                          disabled={loadingPayment}
+                          style={{
+                            background: 'var(--color-accent)',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '10px 24px',
+                            fontWeight: '700',
+                            fontSize: '0.85rem',
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 12px rgba(251, 191, 36, 0.25)',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          {loadingPayment ? 'Opening Portal...' : 'Subscribe'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <h3 style={{ fontSize: '1.2rem', fontFamily: 'var(--font-heading)', marginBottom: '16px', color: 'var(--color-primary-dark)' }}>
+                  Billing History & GST Invoices
+                </h3>
+
                 {payments.length === 0 ? (
                   <p style={{ color: '#777', fontSize: '0.9rem' }}>No payment invoice records found.</p>
                 ) : (

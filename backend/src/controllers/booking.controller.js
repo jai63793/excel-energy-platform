@@ -60,7 +60,7 @@ export const createBooking = async (req, res, next) => {
         bookingDate: new Date(bookingDate),
         timeSlot,
         amount: amount ? parseFloat(amount) : 500.0,
-        status: 'CONFIRMED',
+        status: 'PENDING',
         notes
       },
       include: {
@@ -68,22 +68,6 @@ export const createBooking = async (req, res, next) => {
         user: { select: { name: true, phone: true } }
       }
     });
-
-    // Trigger WhatsApp notification in Test Mode
-    if (req.user.phone) {
-      try {
-        await sendWhatsAppBookingConfirmation(
-          req.user.phone,
-          req.user.name,
-          healer.name,
-          booking.sessionType,
-          new Date(bookingDate).toLocaleDateString(),
-          timeSlot
-        );
-      } catch (waErr) {
-        console.warn('[Booking-Controller] WhatsApp alert warning:', waErr.message);
-      }
-    }
 
     return res.status(201).json({
       success: true,

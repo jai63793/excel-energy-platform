@@ -22,7 +22,7 @@ model User {
   address      String?  @db.Text
   profilePhoto String?  @db.LongText // Base64 profile photo field
   passwordHash String?  // Optional hash, if admin allows password login or sets temp pass
-  status       String   @default("ACTIVE") // ACTIVE, SUSPENDED
+  status       String   @default("ACTIVE") // ACTIVE, INACTIVE
   roleId       Int
   role         Role     @relation(fields: [roleId], references: [id])
   createdAt    DateTime @default(now())

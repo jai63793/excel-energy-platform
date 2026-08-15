@@ -6,9 +6,11 @@ import {
   loginWithOTPAction, 
   registerWithPasswordAction,
   loginWithPasswordAction,
-  loginWithGoogleAction
+  loginWithFirebaseAction,
+  registerWithFirebaseAction
 } from '../store/authSlice';
 import api from '../services/api';
+import { initRecaptcha, sendOTPWithFirebase } from '../services/firebase';
 
 export default function Login() {
   const dispatch = useDispatch();
@@ -16,14 +18,16 @@ export default function Login() {
   const location = useLocation();
   const { loading } = useSelector((state) => state.auth);
 
-  // Read URL params to determine initial view
-  const queryParams = new URLSearchParams(location.search);
-  const isSignupInit = queryParams.get('signup') === 'true';
-
   // Auth Modes & Steps
-  const [isSignup, setIsSignup] = useState(isSignupInit);
-  const [loginType, setLoginType] = useState('password'); // 'password' | 'otp' | 'forgot'
+  const [isSignup, setIsSignup] = useState(false);
+  const [loginType, setLoginType] = useState('password'); // 'otp' | 'forgot' | 'firebase'
   const [step, setStep] = useState('phone-input'); // 'phone-input' | 'otp-verify' | 'forgot-phone' | 'forgot-otp' | 'forgot-new-password'
+
+  // Firebase Phone Auth States
+  const [firebaseConfirmResult, setFirebaseConfirmResult] = useState(null);
+  const [firebaseToken, setFirebaseToken] = useState('');
+  const [isFirebaseRegisterPending, setIsFirebaseRegisterPending] = useState(false);
+  const recaptchaVerifierRef = useRef(null);
 
   // Input states
   const [phone, setPhone] = useState('');
@@ -45,18 +49,12 @@ export default function Login() {
   const [timerActive, setTimerActive] = useState(false);
   const timerRef = useRef(null);
 
-  // Social Modal / Demo states
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
-  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
-  const [customGoogleName, setCustomGoogleName] = useState('');
+
 
   const from = location.state?.from?.pathname || '/dashboard';
   const fromSearch = location.state?.from?.search || '';
 
-  // Synchronize signup url query param
-  useEffect(() => {
-    setIsSignup(isSignupInit);
-  }, [isSignupInit]);
+
 
   // Countdown timer logic
   useEffect(() => {
@@ -108,7 +106,7 @@ export default function Login() {
     }
 
     try {
-      toast.loading('Sending OTP via WhatsApp...');
+      toast.loading('Sending OTP...');
       const res = await api.post('/auth/request-otp', { phone: formattedPhone });
       toast.dismiss();
 
@@ -117,11 +115,7 @@ export default function Login() {
         setStep('otp-verify');
         setTimer(300); // 5 minutes
         setTimerActive(true);
-        toast.success('OTP sent successfully to your WhatsApp!');
-
-        if (res.data.otp) {
-          toast(`[TEST MODE] Mock WhatsApp OTP: ${res.data.otp}`, { icon: '🔑', duration: 10000 });
-        }
+        toast.success('OTP sent successfully to your mobile phone!');
       }
     } catch (err) {
       toast.dismiss();
@@ -148,6 +142,137 @@ export default function Login() {
       navigate(from + fromSearch, { replace: true });
     } else {
       toast.error(result.error || 'Login verification failed.');
+    }
+  };
+
+  // 1b. Firebase Phone OTP Request
+  const handleRequestFirebaseOTP = async (e) => {
+    e.preventDefault();
+    if (!phone || phone.length < 10) {
+      toast.error('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
+    let formattedPhone = phone;
+    if (!phone.startsWith('+')) {
+      formattedPhone = phone.length === 10 ? `+91${phone}` : phone;
+    }
+
+    try {
+      toast.loading('Initializing verification...');
+      
+      // Initialize recaptcha if it hasn't been initialized
+      if (!recaptchaVerifierRef.current) {
+        recaptchaVerifierRef.current = initRecaptcha('firebase-recaptcha-container');
+      }
+
+      const appVerifier = recaptchaVerifierRef.current;
+      toast.dismiss();
+
+      toast.loading('Sending OTP via Firebase...');
+      const confirmationResult = await sendOTPWithFirebase(formattedPhone, appVerifier);
+      toast.dismiss();
+
+      setPhone(formattedPhone);
+      setFirebaseConfirmResult(confirmationResult);
+      setStep('otp-verify');
+      setTimer(300); // 5 minutes
+      setTimerActive(true);
+      
+      if (confirmationResult.isMock) {
+        toast.success(`Mock OTP initialized. Code is ${confirmationResult.otp} (or 123456)`);
+      } else {
+        toast.success('OTP sent successfully to your mobile phone!');
+      }
+    } catch (err) {
+      toast.dismiss();
+      console.error('[Firebase-Send-Error]', err);
+      toast.error(err.message || 'Failed to send Firebase OTP. Please retry.');
+      if (recaptchaVerifierRef.current && recaptchaVerifierRef.current.clear) {
+        try {
+          recaptchaVerifierRef.current.clear();
+        } catch (_) {}
+        recaptchaVerifierRef.current = null;
+      }
+    }
+  };
+
+  // 2b. Verify Firebase Phone OTP & Login or Prompt Registration
+  const handleVerifyFirebaseOTP = async (e) => {
+    e.preventDefault();
+    if (otpCode.length !== 6) {
+      toast.error('Please enter a 6-digit OTP code.');
+      return;
+    }
+
+    if (!firebaseConfirmResult) {
+      toast.error('No verification active. Please request a new OTP.');
+      setStep('phone-input');
+      return;
+    }
+
+    toast.loading('Verifying OTP code...');
+    try {
+      const userCredential = await firebaseConfirmResult.confirm(otpCode);
+      const token = await userCredential.user.getIdToken();
+      setFirebaseToken(token);
+      toast.dismiss();
+
+      toast.loading('Checking registration status...');
+      const result = await dispatch(loginWithFirebaseAction(token));
+      toast.dismiss();
+
+      if (result.success) {
+        setTimerActive(false);
+        clearInterval(timerRef.current);
+        toast.success('Welcome back!');
+        navigate(from + fromSearch, { replace: true });
+      } else if (result.registerRequired) {
+        setTimerActive(false);
+        clearInterval(timerRef.current);
+        // Show complete registration form
+        setIsFirebaseRegisterPending(true);
+        toast.success('OTP verified! Please complete your profile registration.');
+      } else {
+        toast.error(result.error || 'Authentication check failed.');
+      }
+    } catch (err) {
+      toast.dismiss();
+      console.error('[Firebase-Verify-Error]', err);
+      toast.error(err.message || 'Invalid verification code. Please try again.');
+    }
+  };
+
+  // 2c. Complete Firebase Registration Flow
+  const handleFirebaseRegisterSubmit = async (e) => {
+    e.preventDefault();
+    if (!name) {
+      toast.error('Name is required to register.');
+      return;
+    }
+
+    if (!firebaseToken) {
+      toast.error('Session expired. Please start over.');
+      setIsFirebaseRegisterPending(false);
+      setStep('phone-input');
+      return;
+    }
+
+    toast.loading('Creating your account...');
+    const result = await dispatch(registerWithFirebaseAction({
+      firebaseToken,
+      name,
+      email: email || undefined,
+      address: address || undefined
+    }));
+    toast.dismiss();
+
+    if (result.success) {
+      setIsFirebaseRegisterPending(false);
+      toast.success('Account registered successfully!');
+      navigate(from + fromSearch, { replace: true });
+    } else {
+      toast.error(result.error || 'Registration failed.');
     }
   };
 
@@ -230,11 +355,7 @@ export default function Login() {
         setOtpCode('');
         setTimer(300); // 5 minutes
         setTimerActive(true);
-        toast.success('Password Reset OTP sent to WhatsApp!');
-
-        if (res.data.otp) {
-          toast(`[TEST MODE] Mock Reset OTP: ${res.data.otp}`, { icon: '🔑', duration: 10000 });
-        }
+        toast.success('Password Reset OTP sent to your mobile phone!');
       }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to request password reset OTP.');
@@ -328,6 +449,28 @@ export default function Login() {
       overflow: 'hidden',
       fontFamily: 'var(--font-body)'
     }}>
+      <style>{`
+        @media (max-width: 768px) {
+          .login-split-panel {
+            flex-direction: column !important;
+            min-height: auto !important;
+            max-width: 460px !important;
+          }
+          .branding-logo-panel {
+            display: none !important;
+          }
+          .login-form-panel {
+            padding: 30px 20px 40px 20px !important;
+          }
+          .login-brand-header {
+            margin-bottom: 10px !important;
+          }
+          .login-brand-header img {
+            width: 120px !important;
+            height: 120px !important;
+          }
+        }
+      `}</style>
       {/* Background Decorator Accents */}
       <div style={{
         position: 'absolute',
@@ -353,11 +496,11 @@ export default function Login() {
       }} />
 
       {/* TOP SECTION: BRAND LOGO */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '20px', zIndex: 1 }}>
+      <div className="login-brand-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '20px', zIndex: 1 }}>
         <img 
           src={new URL('../assets/images/logo.png', import.meta.url).href} 
           alt="Brand Logo" 
-          style={{ width: '90px', height: '90px', objectFit: 'contain' }}
+          style={{ width: '180px', height: '180px', objectFit: 'contain', display: 'block', margin: '0 auto' }}
         />
         <h2 style={{ fontFamily: 'var(--font-heading)', color: '#fff', marginTop: '10px', fontSize: '1.9rem', fontWeight: '500', letterSpacing: '0.5px' }}>
           Excel Energy
@@ -365,7 +508,7 @@ export default function Login() {
       </div>
 
       {/* MAIN LAYOUT SPLIT PANEL */}
-      <div style={{
+      <div className="login-split-panel" style={{
         display: 'flex',
         flexDirection: isSignup ? 'row' : 'row-reverse', // Left Form/Right Logo on Sign Up; Left Logo/Right Form on Login
         width: '100%',
@@ -383,14 +526,60 @@ export default function Login() {
       }}>
         
         {/* COLUMN 1: FORM INTERFACE PANEL */}
-        <div style={{
+        <div className="login-form-panel" style={{
           flex: 1,
-          padding: '40px',
+          padding: '30px 40px 40px 40px',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
           background: 'rgba(10, 40, 32, 0.4)'
         }}>
+          {/* Back and Home navigation buttons */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            marginBottom: '24px',
+            width: '100%'
+          }}>
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              style={{
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '20px',
+                padding: '6px 14px',
+                fontSize: '0.8rem',
+                color: '#fff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s'
+              }}
+            >
+              ← Back
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              style={{
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '20px',
+                padding: '6px 14px',
+                fontSize: '0.8rem',
+                color: '#fff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s'
+              }}
+            >
+              🏠 Home
+            </button>
+          </div>
           {isSignup ? (
             /* ================= CREATE ACCOUNT FORM ================= */
             <div>
@@ -539,102 +728,95 @@ export default function Login() {
                     Sign in to manage your wellness journey
                   </p>
 
-                  {/* Login Type Tabs */}
-                  <div style={{ display: 'flex', gap: '10px', marginBottom: '24px', background: 'rgba(255,255,255,0.06)', padding: '4px', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', marginBottom: '20px' }}>
                     <button
                       type="button"
-                      onClick={() => { setLoginType('password'); setStep('phone-input'); }}
+                      onClick={() => {
+                        setLoginType('password');
+                        setStep('phone-input');
+                        setIsFirebaseRegisterPending(false);
+                      }}
                       style={{
                         flex: 1,
                         padding: '10px',
+                        background: 'none',
                         border: 'none',
-                        borderRadius: '6px',
-                        background: loginType === 'password' ? 'var(--color-accent)' : 'none',
-                        color: '#fff',
+                        borderBottom: loginType === 'password' ? '2px solid var(--color-accent)' : 'none',
+                        color: loginType === 'password' ? 'var(--color-bg-sand)' : 'rgba(255, 255, 255, 0.5)',
                         fontWeight: '600',
-                        fontSize: '0.88rem',
                         cursor: 'pointer',
-                        transition: 'all 0.25s ease'
+                        fontSize: '0.9rem'
                       }}
                     >
-                      Password Login
+                      Password
                     </button>
                     <button
                       type="button"
-                      onClick={() => setLoginType('otp')}
+                      onClick={() => {
+                        setLoginType('otp');
+                        setStep('phone-input');
+                        setIsFirebaseRegisterPending(false);
+                      }}
                       style={{
                         flex: 1,
                         padding: '10px',
+                        background: 'none',
                         border: 'none',
-                        borderRadius: '6px',
-                        background: loginType === 'otp' ? 'var(--color-accent)' : 'none',
-                        color: '#fff',
+                        borderBottom: loginType === 'otp' ? '2px solid var(--color-accent)' : 'none',
+                        color: loginType === 'otp' ? 'var(--color-bg-sand)' : 'rgba(255, 255, 255, 0.5)',
                         fontWeight: '600',
-                        fontSize: '0.88rem',
                         cursor: 'pointer',
-                        transition: 'all 0.25s ease'
+                        fontSize: '0.9rem'
                       }}
                     >
-                      WhatsApp OTP
+                      Mobile OTP
                     </button>
                   </div>
 
-                  {loginType === 'password' ? (
-                    /* PASSWORD SIGN IN FORM */
-                    <form onSubmit={handlePasswordLoginSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      <div style={{ textAlign: 'left' }}>
-                        <label htmlFor="login-phone" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>WhatsApp Number</label>
-                        <div style={{ position: 'relative' }}>
-                          <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.5)', fontSize: '0.92rem', fontWeight: '600' }}>+91</span>
-                          <input
-                            id="login-phone"
-                            type="tel"
-                            placeholder="10 digit WhatsApp number"
-                            value={phone.replace(/^\+91/, '')}
-                            onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
-                            maxLength={10}
-                            required
-                            style={{ width: '100%', padding: '12px 12px 12px 45px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
-                          />
-                        </div>
-                      </div>
+                  {isFirebaseRegisterPending ? (
+                    <form onSubmit={handleFirebaseRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.6rem', fontWeight: '600', marginBottom: '4px', color: 'var(--color-bg-sand)' }}>
+                        Complete Profile
+                      </h3>
+                      <p style={{ color: 'rgba(255, 255, 255, 0.75)', fontSize: '0.85rem', marginBottom: '12px', lineHeight: '1.4' }}>
+                        Your phone number <strong>{phone}</strong> is verified. Please complete your registration.
+                      </p>
 
                       <div style={{ textAlign: 'left' }}>
-                        <label htmlFor="login-password" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>Password</label>
+                        <label htmlFor="firebase-reg-name" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>Full Name *</label>
                         <input
-                          id="login-password"
-                          type="password"
-                          placeholder="Enter your password"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
+                          id="firebase-reg-name"
+                          type="text"
+                          placeholder="Enter your name"
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
                           required
                           style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
                         />
                       </div>
 
-                      {/* Forgot Password Trigger */}
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-4px' }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setLoginType('forgot');
-                            setStep('forgot-phone');
-                            setTimerActive(false);
-                            clearInterval(timerRef.current);
-                          }}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--color-accent)',
-                            fontWeight: '600',
-                            fontSize: '0.82rem',
-                            cursor: 'pointer',
-                            textDecoration: 'underline',
-                            padding: 0
-                          }}
-                        >
-                          Forgot Password?
-                        </button>
+                      <div style={{ textAlign: 'left' }}>
+                        <label htmlFor="firebase-reg-email" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>Email Address (Optional)</label>
+                        <input
+                          id="firebase-reg-email"
+                          type="email"
+                          placeholder="Enter email address"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
+                        />
+                      </div>
+
+                      <div style={{ textAlign: 'left' }}>
+                        <label htmlFor="firebase-reg-address" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>Address (Optional)</label>
+                        <input
+                          id="firebase-reg-address"
+                          type="text"
+                          placeholder="Enter address"
+                          value={address}
+                          onChange={(e) => setAddress(e.target.value)}
+                          style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
+                        />
                       </div>
 
                       <button
@@ -650,169 +832,289 @@ export default function Login() {
                           fontSize: '1rem',
                           border: 'none',
                           cursor: 'pointer',
-                          marginTop: '5px',
+                          marginTop: '10px',
                           boxShadow: '0 4px 10px rgba(224, 112, 43, 0.25)'
                         }}
                       >
-                        {loading ? 'Signing In...' : 'Sign In'}
+                        {loading ? 'Registering...' : 'Complete & Register'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsFirebaseRegisterPending(false);
+                          setStep('phone-input');
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'rgba(255, 255, 255, 0.6)',
+                          textDecoration: 'underline',
+                          cursor: 'pointer',
+                          fontSize: '0.85rem',
+                          textAlign: 'center',
+                          marginTop: '5px',
+                          display: 'block',
+                          width: '100%'
+                        }}
+                      >
+                        Cancel
                       </button>
                     </form>
-                  ) : (
-                    /* OTP SIGN IN FORM */
-                    <>
-                      {step === 'phone-input' ? (
-                        <form onSubmit={handleRequestOTP} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                          <div style={{ textAlign: 'left' }}>
-                            <label htmlFor="otp-phone" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>WhatsApp Number</label>
-                            <div style={{ position: 'relative' }}>
-                              <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.5)', fontSize: '0.92rem', fontWeight: '600' }}>+91</span>
-                              <input
-                                id="otp-phone"
-                                type="tel"
-                                placeholder="10 digit WhatsApp number"
-                                value={phone.replace(/^\+91/, '')}
-                                onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
-                                maxLength={10}
-                                required
-                                style={{ width: '100%', padding: '12px 12px 12px 45px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
-                              />
-                            </div>
-                          </div>
-
-                          <button
-                            type="submit"
-                            disabled={loading}
-                            style={{
-                              width: '100%',
-                              padding: '14px',
-                              borderRadius: '6px',
-                              background: 'var(--color-accent)',
-                              color: '#fff',
-                              fontWeight: '600',
-                              fontSize: '1rem',
-                              border: 'none',
-                              cursor: 'pointer',
-                              marginTop: '10px',
-                              boxShadow: '0 4px 10px rgba(224, 112, 43, 0.25)'
-                            }}
-                          >
-                            {loading ? 'Requesting...' : 'Send OTP via WhatsApp'}
-                          </button>
-                        </form>
-                      ) : (
-                        <form onSubmit={handleVerifyOTP} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                          <div style={{ textAlign: 'left' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                              <label htmlFor="otp-verify" style={{ fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)' }}>Enter 6-Digit OTP</label>
-                              <span style={{ fontSize: '0.82rem', color: 'var(--color-accent)', fontWeight: '700' }}>⏱ {formatTime(timer)}</span>
-                            </div>
+                  ) : step === 'phone-input' ? (
+                    loginType === 'otp' ? (
+                      <form onSubmit={handleRequestOTP} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div style={{ textAlign: 'left' }}>
+                          <label htmlFor="otp-phone" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>WhatsApp Number</label>
+                          <div style={{ position: 'relative' }}>
+                            <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.5)', fontSize: '0.92rem', fontWeight: '600' }}>+91</span>
                             <input
-                              id="otp-verify"
-                              type="text"
-                              placeholder="6 Digit Code"
-                              maxLength={6}
-                              value={otpCode}
-                              onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, ''))}
-                              disabled={loading}
+                              id="otp-phone"
+                              type="tel"
+                              placeholder="10 digit WhatsApp number"
+                              value={phone.replace(/^\+91/, '')}
+                              onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                              maxLength={10}
                               required
-                              style={{
-                                width: '100%',
-                                padding: '12px',
-                                borderRadius: '6px',
-                                border: '1px solid rgba(255, 255, 255, 0.15)',
-                                background: 'rgba(0, 0, 0, 0.2)',
-                                color: '#fff',
-                                fontSize: '1.2rem',
-                                letterSpacing: '6px',
-                                textAlign: 'center',
-                                outline: 'none'
-                              }}
+                              style={{ width: '100%', padding: '12px 12px 12px 45px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
                             />
                           </div>
+                        </div>
 
-                          <button
-                            type="submit"
-                            disabled={loading}
-                            style={{
-                              width: '100%',
-                              padding: '14px',
-                              borderRadius: '6px',
-                              background: 'var(--color-accent)',
-                              color: '#fff',
-                              fontWeight: '600',
-                              fontSize: '1rem',
-                              border: 'none',
-                              cursor: 'pointer',
-                              boxShadow: '0 4px 10px rgba(224, 112, 43, 0.25)'
-                            }}
-                          >
-                            {loading ? 'Verifying...' : 'Verify & Log In'}
-                          </button>
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          style={{
+                            width: '100%',
+                            padding: '14px',
+                            borderRadius: '6px',
+                            background: 'var(--color-accent)',
+                            color: '#fff',
+                            fontWeight: '600',
+                            fontSize: '1rem',
+                            border: 'none',
+                            cursor: 'pointer',
+                            marginTop: '10px',
+                            boxShadow: '0 4px 10px rgba(224, 112, 43, 0.25)'
+                          }}
+                        >
+                          {loading ? 'Requesting...' : 'Send OTP via WhatsApp'}
+                        </button>
 
+                        {/* Forgot Password Trigger */}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2px' }}>
                           <button
                             type="button"
-                            onClick={() => { setStep('phone-input'); setTimerActive(false); clearInterval(timerRef.current); }}
+                            onClick={() => {
+                              setLoginType('forgot');
+                              setStep('forgot-phone');
+                              setTimerActive(false);
+                              clearInterval(timerRef.current);
+                            }}
                             style={{
                               background: 'none',
                               border: 'none',
-                              color: 'rgba(255, 255, 255, 0.6)',
-                              textDecoration: 'underline',
+                              color: 'var(--color-accent)',
+                              fontWeight: '600',
+                              fontSize: '0.82rem',
                               cursor: 'pointer',
-                              fontSize: '0.85rem'
+                              textDecoration: 'underline',
+                              padding: 0
                             }}
                           >
-                            Request new OTP
+                            Forgot Password?
                           </button>
-                        </form>
-                      )}
-                    </>
+                        </div>
+                      </form>
+                    ) : loginType === 'firebase' ? (
+                      <form onSubmit={handleRequestFirebaseOTP} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div style={{ textAlign: 'left' }}>
+                          <label htmlFor="firebase-phone" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>Mobile Number</label>
+                          <div style={{ position: 'relative' }}>
+                            <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.5)', fontSize: '0.92rem', fontWeight: '600' }}>+91</span>
+                            <input
+                              id="firebase-phone"
+                              type="tel"
+                              placeholder="10 digit mobile number"
+                              value={phone.replace(/^\+91/, '')}
+                              onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                              maxLength={10}
+                              required
+                              style={{ width: '100%', padding: '12px 12px 12px 45px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          style={{
+                            width: '100%',
+                            padding: '14px',
+                            borderRadius: '6px',
+                            background: 'var(--color-accent)',
+                            color: '#fff',
+                            fontWeight: '600',
+                            fontSize: '1rem',
+                            border: 'none',
+                            cursor: 'pointer',
+                            marginTop: '10px',
+                            boxShadow: '0 4px 10px rgba(224, 112, 43, 0.25)'
+                          }}
+                        >
+                          {loading ? 'Requesting...' : 'Send OTP via Firebase'}
+                        </button>
+                        
+                        <div id="firebase-recaptcha-container" style={{ marginTop: '10px' }}></div>
+                      </form>
+                    ) : (
+                      <form onSubmit={handlePasswordLoginSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div style={{ textAlign: 'left' }}>
+                          <label htmlFor="pass-phone" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>WhatsApp Number</label>
+                          <div style={{ position: 'relative' }}>
+                            <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.5)', fontSize: '0.92rem', fontWeight: '600' }}>+91</span>
+                            <input
+                              id="pass-phone"
+                              type="tel"
+                              placeholder="10 digit WhatsApp number"
+                              value={phone.replace(/^\+91/, '')}
+                              onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                              maxLength={10}
+                              required
+                              style={{ width: '100%', padding: '12px 12px 12px 45px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'left' }}>
+                          <label htmlFor="pass-password" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>Password</label>
+                          <input
+                            id="pass-password"
+                            type="password"
+                            placeholder="Enter password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            required
+                            style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
+                          />
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          style={{
+                            width: '100%',
+                            padding: '14px',
+                            borderRadius: '6px',
+                            background: 'var(--color-accent)',
+                            color: '#fff',
+                            fontWeight: '600',
+                            fontSize: '1rem',
+                            border: 'none',
+                            cursor: 'pointer',
+                            marginTop: '10px',
+                            boxShadow: '0 4px 10px rgba(224, 112, 43, 0.25)'
+                          }}
+                        >
+                          {loading ? 'Logging in...' : 'Sign In with Password'}
+                        </button>
+
+                        {/* Forgot Password Trigger */}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2px' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLoginType('forgot');
+                              setStep('forgot-phone');
+                              setTimerActive(false);
+                              clearInterval(timerRef.current);
+                            }}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--color-accent)',
+                              fontWeight: '600',
+                              fontSize: '0.82rem',
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                              padding: 0
+                            }}
+                          >
+                            Forgot Password?
+                          </button>
+                        </div>
+                      </form>
+                    )
+                  ) : (
+                    <form onSubmit={loginType === 'firebase' ? handleVerifyFirebaseOTP : handleVerifyOTP} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label htmlFor="otp-verify" style={{ fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)' }}>Enter 6-Digit OTP</label>
+                          <span style={{ fontSize: '0.82rem', color: 'var(--color-accent)', fontWeight: '700' }}>⏱ {formatTime(timer)}</span>
+                        </div>
+                        <input
+                          id="otp-verify"
+                          type="text"
+                          placeholder="6 Digit Code"
+                          maxLength={6}
+                          value={otpCode}
+                          onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, ''))}
+                          disabled={loading}
+                          required
+                          style={{
+                            width: '100%',
+                            padding: '12px',
+                            borderRadius: '6px',
+                            border: '1px solid rgba(255, 255, 255, 0.15)',
+                            background: 'rgba(0, 0, 0, 0.2)',
+                            color: '#fff',
+                            fontSize: '1.2rem',
+                            letterSpacing: '6px',
+                            textAlign: 'center',
+                            outline: 'none'
+                          }}
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        style={{
+                          width: '100%',
+                          padding: '14px',
+                          borderRadius: '6px',
+                          background: 'var(--color-accent)',
+                          color: '#fff',
+                          fontWeight: '600',
+                          fontSize: '1rem',
+                          border: 'none',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 10px rgba(224, 112, 43, 0.25)'
+                        }}
+                      >
+                        {loading ? 'Verifying...' : 'Verify & Log In'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setStep('phone-input'); setTimerActive(false); clearInterval(timerRef.current); }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'rgba(255, 255, 255, 0.6)',
+                          textDecoration: 'underline',
+                          cursor: 'pointer',
+                          fontSize: '0.85rem',
+                          textAlign: 'center',
+                          marginTop: '5px'
+                        }}
+                      >
+                        Request new OTP
+                      </button>
+                    </form>
                   )}
 
-                  {/* Social or Split divider */}
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '10px',
-                    color: 'rgba(255,255,255,0.3)',
-                    fontSize: '0.8rem',
-                    margin: '24px 0 16px 0'
-                  }}>
-                    <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', flex: 1 }} />
-                    <span>OR SOCIAL SIGN IN</span>
-                    <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', flex: 1 }} />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowGoogleModal(true)}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      borderRadius: '6px',
-                      background: '#fff',
-                      color: '#333',
-                      fontWeight: '650',
-                      fontSize: '0.9rem',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '10px',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" width="18" height="18">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                    </svg>
-                    Sign In with Google
-                  </button>
-
-                  <div style={{ marginTop: '24px', textAlign: 'center', fontSize: '0.9rem' }}>
+                  <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '0.9rem' }}>
                     <span style={{ color: 'rgba(255,255,255,0.6)' }}>Don't have an account? </span>
                     <button 
                       type="button" 
@@ -822,6 +1124,10 @@ export default function Login() {
                       Sign Up
                     </button>
                   </div>
+
+                  {/* Social login removed for live production */}
+
+
                 </>
               ) : (
                 /* ================= FORGOT PASSWORD STEPS ================= */
@@ -1033,7 +1339,7 @@ export default function Login() {
         </div>
 
         {/* COLUMN 2: BRANDING LOGO DISPLAY PANEL */}
-        <div style={{
+        <div className="branding-logo-panel" style={{
           flex: 1,
           background: 'linear-gradient(135deg, var(--color-primary-dark) 0%, var(--color-primary-medium) 100%)',
           display: 'flex',
@@ -1049,7 +1355,7 @@ export default function Login() {
             <img 
               src={new URL('../assets/images/logo.png', import.meta.url).href} 
               alt="Excel Energy Banner Logo" 
-              style={{ width: '170px', height: '170px', objectFit: 'contain', marginBottom: '24px' }}
+              style={{ width: '240px', height: '240px', objectFit: 'contain', display: 'block', margin: '0 auto 24px auto' }}
             />
             <h4 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.5rem', color: '#fff', marginBottom: '12px', fontWeight: '500' }}>
               Excel Energy
@@ -1065,276 +1371,9 @@ export default function Login() {
 
       </div>
 
-      {/* QUICK DEMO USER SELECTION BOX */}
-      <div style={{
-        marginTop: '30px',
-        padding: '24px',
-        background: 'rgba(255, 255, 255, 0.06)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        borderRadius: '12px',
-        width: '100%',
-        maxWidth: '900px',
-        zIndex: 1,
-        color: '#fff',
-        textAlign: 'left'
-      }}>
-        <h4 style={{
-          fontSize: '0.85rem',
-          color: 'var(--color-bg-sand)',
-          fontWeight: '600',
-          marginBottom: '14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          textTransform: 'uppercase',
-          letterSpacing: '1px'
-        }}>
-          🔑 Quick Demo Accounts (Test Mode / Autofill)
-        </h4>
-        
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '12px' }}>
-          {/* Paid User */}
-          <div style={{
-            background: 'rgba(0, 0, 0, 0.2)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '8px',
-            padding: '12px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center'
-          }}>
-            <div>
-              <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#fff' }}>
-                Amit Patel <span style={{ fontSize: '0.7rem', color: 'var(--color-accent)', background: 'rgba(224, 112, 43, 0.15)', padding: '2px 6px', borderRadius: '10px', marginLeft: '6px' }}>Paid Member</span>
-              </div>
-              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', marginTop: '2px' }}>
-                Phone: 9876543210 | Code: 123456
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setPhone('9876543210');
-                setOtpCode('123456');
-                setIsSignup(false);
-                setLoginType('otp');
-                setStep('otp-verify');
-                toast.success('Amit\'s WhatsApp OTP flow prefilled!');
-              }}
-              style={{ background: 'var(--color-accent)', color: '#fff', border: 'none', borderRadius: '4px', padding: '5px 10px', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer' }}
-            >
-              Autofill
-            </button>
-          </div>
 
-          {/* Unpaid User */}
-          <div style={{
-            background: 'rgba(0, 0, 0, 0.2)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '8px',
-            padding: '12px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center'
-          }}>
-            <div>
-              <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#fff' }}>
-                Neha Singh <span style={{ fontSize: '0.7rem', color: '#9ca3af', background: 'rgba(255, 255, 255, 0.1)', padding: '2px 6px', borderRadius: '10px', marginLeft: '6px' }}>Unpaid User</span>
-              </div>
-              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', marginTop: '2px' }}>
-                Phone: 8765432109 | Code: 123456
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setPhone('8765432109');
-                setOtpCode('123456');
-                setIsSignup(false);
-                setLoginType('otp');
-                setStep('otp-verify');
-                toast.success('Neha\'s WhatsApp OTP flow prefilled!');
-              }}
-              style={{ background: 'rgba(255, 255, 255, 0.15)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px', padding: '4px 9px', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer' }}
-            >
-              Autofill
-            </button>
-          </div>
 
-          {/* Healer User */}
-          <div style={{
-            background: 'rgba(0, 0, 0, 0.2)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '8px',
-            padding: '12px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center'
-          }}>
-            <div>
-              <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#fff' }}>
-                Dr. Rajesh Iyer <span style={{ fontSize: '0.7rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.15)', padding: '2px 6px', borderRadius: '10px', marginLeft: '6px' }}>Healer</span>
-              </div>
-              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', marginTop: '2px' }}>
-                Phone: 7654321098 | Code: 123456
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setPhone('7654321098');
-                setOtpCode('123456');
-                setIsSignup(false);
-                setLoginType('otp');
-                setStep('otp-verify');
-                toast.success('Dr. Rajesh\'s WhatsApp OTP flow prefilled!');
-              }}
-              style={{ background: 'rgba(255, 255, 255, 0.15)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px', padding: '4px 9px', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer' }}
-            >
-              Autofill
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* MOCK GOOGLE SELECTOR MODAL */}
-      {showGoogleModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          background: 'rgba(0,0,0,0.6)',
-          backdropFilter: 'blur(5px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            background: '#fff',
-            borderRadius: '12px',
-            width: '100%',
-            maxWidth: '400px',
-            padding: '30px',
-            color: '#333',
-            textAlign: 'left',
-            boxShadow: '0 10px 25px rgba(0,0,0,0.2)'
-          }}>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '1.25rem', fontWeight: 'bold' }}>Sign in with Google</h3>
-            <p style={{ margin: '0 0 20px 0', fontSize: '0.85rem', color: '#666' }}>
-              Choose a mock Google Account to authenticate:
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-              <button
-                type="button"
-                onClick={() => handleGoogleSelect('Jai Ram', 'jai@gmail.com')}
-                style={{
-                  background: '#f8faf9',
-                  border: '1px solid #ddd',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  fontWeight: '600'
-                }}
-              >
-                <div>Jai Ram</div>
-                <div style={{ fontSize: '0.75rem', color: '#777', fontWeight: 'normal' }}>jai@gmail.com</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleGoogleSelect('Priya Sharma', 'priya@gmail.com')}
-                style={{
-                  background: '#f8faf9',
-                  border: '1px solid #ddd',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  fontWeight: '600'
-                }}
-              >
-                <div>Priya Sharma</div>
-                <div style={{ fontSize: '0.75rem', color: '#777', fontWeight: 'normal' }}>priya@gmail.com</div>
-              </button>
-            </div>
-
-            <div style={{ height: '1px', background: '#eee', margin: '15px 0' }} />
-            
-            <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', fontWeight: 'bold' }}>Or Enter a Mock Custom Account</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-              <input
-                type="text"
-                placeholder="Google Account Full Name"
-                value={customGoogleName}
-                onChange={(e) => setCustomGoogleName(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderRadius: '6px',
-                  border: '1px solid #ccc',
-                  color: '#333'
-                }}
-              />
-              <input
-                type="email"
-                placeholder="Google Email"
-                value={customGoogleEmail}
-                onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderRadius: '6px',
-                  border: '1px solid #ccc',
-                  color: '#333'
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (!customGoogleEmail || !customGoogleName) {
-                    toast.error('Please enter both name and email.');
-                    return;
-                  }
-                  handleGoogleSelect(customGoogleName, customGoogleEmail);
-                }}
-                style={{
-                  background: 'var(--color-primary-medium)',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '10px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: '600'
-                }}
-              >
-                Sign In with Custom Google Account
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShowGoogleModal(false)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#ef4444',
-                cursor: 'pointer',
-                fontWeight: '600',
-                fontSize: '0.9rem',
-                display: 'block',
-                margin: '10px auto 0 auto'
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Mock Google Modal removed for live production */}
     </div>
   );
 }

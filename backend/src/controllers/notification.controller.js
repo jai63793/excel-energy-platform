@@ -1,5 +1,5 @@
 import prisma from '../config/db.js';
-import { sendWhatsAppAdminAnnouncement, sendWhatsAppYouTubeLive } from '../services/whatsapp.service.js';
+import { sendLiveLinkSMS, sendBroadcastSMS } from '../services/sms.service.js';
 
 /**
  * Send bulk notifications to target audiences
@@ -23,7 +23,7 @@ export const sendBulkNotification = async (req, res, next) => {
 
     // 2. Fetch targets based on audience selector
     if (targetAudience === 'ALL') {
-      targetUsers = await prisma.user.findMany({ where: { roleId: 2, status: 'ACTIVE' } });
+      targetUsers = await prisma.user.findMany({ where: { status: 'ACTIVE' } });
     } else if (targetAudience === 'PAID') {
       const activeSubs = await prisma.subscription.findMany({
         where: { status: 'ACTIVE', endDate: { gte: now } },
@@ -61,12 +61,12 @@ export const sendBulkNotification = async (req, res, next) => {
       });
     }
 
-    // Dispatch WhatsApp messages asynchronously to not block the admin request
+    // Dispatch broadcast messages asynchronously via SMS/OTP service (Scopycode)
     targetUsers.forEach(async (user) => {
       try {
-        await sendWhatsAppAdminAnnouncement(user.phone, user.name, title, description);
+        await sendBroadcastSMS(user.phone, user.name, title, description);
       } catch (waError) {
-        console.error(`[WhatsApp-Broadcast] Failed sending to ${user.phone}:`, waError.message);
+        console.error(`[Scopycode-Broadcast] Failed sending to ${user.phone}:`, waError.message);
       }
     });
 
@@ -136,12 +136,12 @@ export const sendYouTubeLive = async (req, res, next) => {
       data: userNotificationData
     });
 
-    // Dispatch WhatsApp Invites
+    // Dispatch YouTube Live invitations via SMS/OTP service (Scopycode)
     paidUsers.forEach(async (user) => {
       try {
-        await sendWhatsAppYouTubeLive(user.phone, user.name, liveUrl);
+        await sendLiveLinkSMS(user.phone, user.name, liveUrl);
       } catch (waError) {
-        console.error(`[WhatsApp-LiveStream] Failed sending to ${user.phone}:`, waError.message);
+        console.error(`[Scopycode-LiveStream] Failed sending to ${user.phone}:`, waError.message);
       }
     });
 
@@ -318,3 +318,22 @@ export const markAllNotificationsRead = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Get all previously sent announcements/broadcasts for Admin panel history
+ */
+export const getBroadcastHistory = async (req, res, next) => {
+  try {
+    const broadcasts = await prisma.notification.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 50
+    });
+    return res.status(200).json({
+      success: true,
+      broadcasts
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

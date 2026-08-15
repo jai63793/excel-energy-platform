@@ -185,6 +185,40 @@ export default function EmployeeDashboard() {
     }
   };
 
+  const handleAcceptBooking = async (bookingId) => {
+    try {
+      toast.loading('Accepting booking...');
+      const res = await api.put(`/employee/bookings/${bookingId}`, {
+        status: 'CONFIRMED'
+      });
+      toast.dismiss();
+      if (res.data.success) {
+        toast.success('Booking accepted successfully! Client notified via WhatsApp.');
+        fetchEmployeeData();
+      }
+    } catch (err) {
+      toast.dismiss();
+      toast.error('Failed to accept booking.');
+    }
+  };
+
+  const handleDeclineBooking = async (bookingId) => {
+    try {
+      toast.loading('Declining booking...');
+      const res = await api.put(`/employee/bookings/${bookingId}`, {
+        status: 'CANCELLED'
+      });
+      toast.dismiss();
+      if (res.data.success) {
+        toast.success('Booking declined.');
+        fetchEmployeeData();
+      }
+    } catch (err) {
+      toast.dismiss();
+      toast.error('Failed to decline booking.');
+    }
+  };
+
   const activeCheckIn = attendanceHistory.find((a) => !a.checkOut);
 
   const renderSidebarContent = () => (
@@ -241,25 +275,49 @@ export default function EmployeeDashboard() {
         </nav>
       </div>
 
-      <button
-        onClick={() => {
-          dispatch(logoutAction());
-          toast.success('Logged out.');
-          navigate('/secure-admin-login');
-        }}
-        style={{
-          background: '#ef4444',
-          color: '#fff',
-          border: 'none',
-          borderRadius: '6px',
-          padding: '10px 15px',
-          fontWeight: '600',
-          cursor: 'pointer',
-          marginTop: '20px'
-        }}
-      >
-        Logout Panel
-      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '20px' }}>
+        <button
+          onClick={() => navigate('/')}
+          style={{
+            background: 'var(--color-primary-medium)',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '6px',
+            padding: '10px 15px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px'
+          }}
+        >
+          🏠 Go to Website Home
+        </button>
+
+        <button
+          onClick={() => {
+            dispatch(logoutAction());
+            toast.success('Logged out.');
+            navigate('/employee-login');
+          }}
+          style={{
+            background: '#ef4444',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '6px',
+            padding: '10px 15px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px'
+          }}
+        >
+          🚪 Logout Panel
+        </button>
+      </div>
     </>
   );
 
@@ -452,9 +510,81 @@ export default function EmployeeDashboard() {
           {/* Tab 1: Duty & Attendance Control */}
           {activeTab === 'duty' && (
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: '30px' }}>
-              {/* Shift Check-In / Check-Out Control Card */}
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', alignSelf: 'start' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', alignSelf: 'start' }}>
+                {/* Practitioner Profile Summary Card */}
+                <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+                  <div style={{ textAlign: 'center', marginBottom: '20px', borderBottom: '1px solid #edf2f0', paddingBottom: '20px' }}>
+                    <div style={{
+                      width: '70px',
+                      height: '70px',
+                      borderRadius: '50%',
+                      background: 'var(--color-primary-medium)',
+                      color: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '1.8rem',
+                      fontWeight: 'bold',
+                      margin: '0 auto 12px auto',
+                      boxShadow: '0 4px 10px rgba(12, 71, 55, 0.15)'
+                    }}>
+                      {user?.name ? user.name.charAt(0).toUpperCase() : 'P'}
+                    </div>
+                    <h3 style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--color-primary-dark)', margin: '0 0 4px 0' }}>
+                      {user?.name || 'Practitioner'}
+                    </h3>
+                    <span style={{
+                      display: 'inline-block',
+                      background: 'var(--color-primary-light)',
+                      color: 'var(--color-primary-medium)',
+                      padding: '3px 10px',
+                      borderRadius: '12px',
+                      fontSize: '0.75rem',
+                      fontWeight: '700'
+                    }}>
+                      ⭐ {profile?.rating ? profile.rating.toFixed(1) : '5.0'} Healer Rating
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '0.82rem', color: '#475569' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '1.1rem' }}>🛡️</span>
+                      <div>
+                        <strong style={{ color: '#1e293b', display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Specialization</strong>
+                        <span>{specialization || 'Energy Healer & Practitioner'}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '1.1rem' }}>📞</span>
+                      <div>
+                        <strong style={{ color: '#1e293b', display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Mobile Number</strong>
+                        <span>{user?.phone || '-'}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '1.1rem' }}>📧</span>
+                      <div>
+                        <strong style={{ color: '#1e293b', display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Email Address</strong>
+                        <span>{user?.email || '-'}</span>
+                      </div>
+                    </div>
+
+                    {bio && (
+                      <div style={{ marginTop: '6px', borderTop: '1px solid #edf2f0', paddingTop: '12px' }}>
+                        <strong style={{ color: '#1e293b', display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Biography</strong>
+                        <p style={{ margin: 0, fontStyle: 'italic', color: '#64748b', lineHeight: '1.4', textAlign: 'left' }}>
+                          "{bio}"
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Shift Check-In / Check-Out Control Card */}
+                <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <UserCheck style={{ color: 'var(--color-accent)' }} />
                   <span>Shift Control</span>
                 </h3>
@@ -597,6 +727,7 @@ export default function EmployeeDashboard() {
                   )}
                 </div>
               </div>
+            </div>
 
               {/* Attendance Logs History Card */}
               <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
@@ -718,31 +849,70 @@ export default function EmployeeDashboard() {
                         )}
                       </div>
 
-                      <button
-                        onClick={() => {
-                          setSelectedBooking(b);
-                          setBookingNotes(b.notes || '');
-                          setBookingStatus(b.status || 'CONFIRMED');
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '10px',
-                          background: '#f1f5f9',
-                          color: '#1e293b',
-                          border: 'none',
-                          borderRadius: '8px',
-                          fontSize: '0.82rem',
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px'
-                        }}
-                      >
-                        <FileText style={{ color: 'var(--color-accent)' }} />
-                        <span>Update Session Notes</span>
-                      </button>
+                      {b.status === 'PENDING' ? (
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                          <button
+                            onClick={() => handleAcceptBooking(b.id)}
+                            style={{
+                              flex: 1,
+                              padding: '10px',
+                              background: '#22c55e',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '8px',
+                              fontSize: '0.82rem',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              textAlign: 'center'
+                            }}
+                          >
+                            Accept
+                          </button>
+                          <button
+                            onClick={() => handleDeclineBooking(b.id)}
+                            style={{
+                              flex: 1,
+                              padding: '10px',
+                              background: '#ef4444',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '8px',
+                              fontSize: '0.82rem',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              textAlign: 'center'
+                            }}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setSelectedBooking(b);
+                            setBookingNotes(b.notes || '');
+                            setBookingStatus(b.status || 'CONFIRMED');
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '10px',
+                            background: '#f1f5f9',
+                            color: '#1e293b',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontSize: '0.82rem',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          <FileText style={{ color: 'var(--color-accent)' }} />
+                          <span>Update Session Notes</span>
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
