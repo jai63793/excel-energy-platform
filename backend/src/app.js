@@ -18,6 +18,9 @@ import bookingRoutes from './routes/booking.routes.js';
 
 const app = express();
 
+// Enable trust proxy to support reverse proxies (Render, Cloudflare, etc.) and prevent express-rate-limit validation errors
+app.set('trust proxy', 1);
+
 // 1. Security Headers configuration
 app.use(helmet());
 
