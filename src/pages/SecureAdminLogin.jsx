@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { loginWithOTPAction, loginWithPasswordAction } from '../store/authSlice';
 import api from '../services/api';
+import { hashPasswordSHA256 } from '../utils/hash';
 
 export default function SecureAdminLogin() {
   const dispatch = useDispatch();
@@ -207,10 +208,11 @@ export default function SecureAdminLogin() {
 
     setLoadingPasswordReset(true);
     try {
+      const hashedPassword = await hashPasswordSHA256(newPassword);
       const res = await api.post('/auth/forgot-password-reset', {
         phone,
         otpCode,
-        newPassword
+        newPassword: hashedPassword
       });
       if (res.data?.success) {
         toast.success('Password changed successfully! You can now log in.');

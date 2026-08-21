@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { hashPasswordSHA256 } from '../utils/hash';
 import { loginWithOTPAction, loginWithPasswordAction } from '../store/authSlice';
 import api from '../services/api';
 
@@ -207,10 +208,11 @@ export default function EmployeeLogin() {
 
     setLoadingPasswordReset(true);
     try {
+      const hashedPassword = await hashPasswordSHA256(newPassword);
       const res = await api.post('/auth/forgot-password-reset', {
         phone,
         otpCode,
-        newPassword
+        newPassword: hashedPassword
       });
       if (res.data?.success) {
         toast.success('Password changed successfully! You can now log in.');

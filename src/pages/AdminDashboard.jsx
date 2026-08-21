@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { logoutAction, updateProfileSuccess } from '../store/authSlice';
 import api from '../services/api';
+import * as XLSX from 'xlsx';
+import { hashPasswordSHA256 } from '../utils/hash';
 
 export default function AdminDashboard() {
   const dispatch = useDispatch();
@@ -58,6 +60,9 @@ export default function AdminDashboard() {
   const [uPlan, setUPlan] = useState('1month');
   const [isPaymentLinkMode, setIsPaymentLinkMode] = useState(false);
   const [registrationResult, setRegistrationResult] = useState(null);
+  const [showBulkUserModal, setShowBulkUserModal] = useState(false);
+  const [bulkUsersList, setBulkUsersList] = useState([{ name: '', phone: '', email: '', password: '' }]);
+  const [bulkResult, setBulkResult] = useState(null);
 
   // Payments List States
   const [payments, setPayments] = useState([]);
@@ -339,7 +344,7 @@ export default function AdminDashboard() {
       roleName: staffRole,
       specialization: staffSpecialization,
       bio: staffBio,
-      password: staffPassword || undefined
+      password: staffPassword ? await hashPasswordSHA256(staffPassword) : undefined
     };
 
     try {
@@ -603,7 +608,7 @@ export default function AdminDashboard() {
       email: uEmail || null,
       address: uAddress || null,
       status: uStatus,
-      password: uPassword || undefined
+      password: uPassword ? await hashPasswordSHA256(uPassword) : undefined
     };
 
     try {
@@ -647,6 +652,153 @@ export default function AdminDashboard() {
       toast.dismiss();
       toast.error(err.response?.data?.message || 'Failed to save user.');
     }
+  };
+
+  // Bulk Users Action Handlers
+  const handleOpenBulkModal = () => {
+    setBulkUsersList([{ name: '', phone: '', email: '', password: '' }]);
+    setBulkResult(null);
+    setShowBulkUserModal(true);
+  };
+
+  const handleAddBulkRow = () => {
+    setBulkUsersList([...bulkUsersList, { name: '', phone: '', email: '', password: '' }]);
+  };
+
+  const handleRemoveBulkRow = (index) => {
+    if (bulkUsersList.length === 1) {
+      setBulkUsersList([{ name: '', phone: '', email: '', password: '' }]);
+    } else {
+      setBulkUsersList(bulkUsersList.filter((_, idx) => idx !== index));
+    }
+  };
+
+  const handleBulkUserChange = (index, field, value) => {
+    const updated = [...bulkUsersList];
+    updated[index][field] = value;
+    setBulkUsersList(updated);
+  };
+
+  const handleSaveBulkUsers = async (e) => {
+    e.preventDefault();
+    
+    // Validate that at least one user is entered properly
+    const validUsers = bulkUsersList.filter(u => u.name.trim() !== '' || u.phone.trim() !== '');
+    if (validUsers.length === 0) {
+      toast.error('Please enter at least one user with Name and Mobile number.');
+      return;
+    }
+
+    // Check that Name and Phone are entered for all non-empty rows
+    for (let i = 0; i < validUsers.length; i++) {
+      const u = validUsers[i];
+      if (!u.name.trim() || !u.phone.trim()) {
+        toast.error(`Row ${i + 1} is missing Name or Mobile number.`);
+        return;
+      }
+    }
+
+    // Format phones to +91 structure if not already formatted
+    // Format phones and hash passwords if provided
+    const formattedUsers = await Promise.all(validUsers.map(async u => {
+      let rawPhone = u.phone.replace(/[+\s-]/g, '');
+      if (rawPhone.length === 10) {
+        rawPhone = `+91${rawPhone}`;
+      } else if (!rawPhone.startsWith('+')) {
+        rawPhone = `+${rawPhone}`;
+      }
+      return {
+        ...u,
+        phone: rawPhone,
+        password: u.password ? await hashPasswordSHA256(u.password) : undefined
+      };
+    }));
+
+    toast.loading('Bulk registering users...');
+    try {
+      const res = await api.post('/admin/users/bulk', { users: formattedUsers });
+      toast.dismiss();
+      if (res.data.success) {
+        toast.success(`Successfully registered ${res.data.registeredCount} users!`);
+        setBulkResult(res.data);
+        loadUsersList(1);
+      }
+    } catch (err) {
+      toast.dismiss();
+      toast.error(err.response?.data?.message || 'Failed to bulk register users.');
+    }
+  };
+
+  const handleExcelUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const fileExtension = file.name.split('.').pop().toLowerCase();
+    if (!['xlsx', 'xls', 'csv'].includes(fileExtension)) {
+      toast.error('Invalid file format. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        
+        // Convert sheet to 2D array of rows
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        if (rows.length <= 1) {
+          toast.error('The uploaded file is empty or missing data rows.');
+          return;
+        }
+
+        // Parse headers to find indexes
+        const headers = rows[0].map(h => String(h).trim().toLowerCase());
+        
+        const nameIdx = headers.findIndex(h => h.includes('name'));
+        const phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('whatsapp') || h.includes('mobile') || h.includes('number'));
+        const passwordIdx = headers.findIndex(h => h.includes('pass'));
+        const emailIdx = headers.findIndex(h => h.includes('email') || h.includes('mail'));
+
+        if (nameIdx === -1 || phoneIdx === -1) {
+          toast.error('Missing required columns. The file must contain columns named "Name" and "Phone" (or Mobile/WhatsApp).');
+          return;
+        }
+
+        const parsedUsers = [];
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row || row.length === 0) continue;
+
+          const name = nameIdx !== -1 && row[nameIdx] !== undefined ? String(row[nameIdx]).trim() : '';
+          const phone = phoneIdx !== -1 && row[phoneIdx] !== undefined ? String(row[phoneIdx]).trim() : '';
+          const password = passwordIdx !== -1 && row[passwordIdx] !== undefined ? String(row[passwordIdx]).trim() : '';
+          const email = emailIdx !== -1 && row[emailIdx] !== undefined ? String(row[emailIdx]).trim() : '';
+
+          // Only include if Name or Phone is filled (so we skip trailing empty lines)
+          if (name || phone) {
+            parsedUsers.push({ name, phone, password, email });
+          }
+        }
+
+        if (parsedUsers.length === 0) {
+          toast.error('No valid user rows found in the file.');
+          return;
+        }
+
+        setBulkUsersList(parsedUsers);
+        toast.success(`Successfully loaded ${parsedUsers.length} users from file! Please review and submit.`);
+      } catch (err) {
+        console.error('[Excel-Upload-Error]', err);
+        toast.error('Failed to parse the Excel file. Please ensure it is not corrupted.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    
+    // Clear input so same file can be uploaded again
+    e.target.value = '';
   };
 
   // Contacts Actions
@@ -826,9 +978,11 @@ export default function AdminDashboard() {
 
     try {
       toast.loading('Updating password...');
+      const hashedCurrent = await hashPasswordSHA256(currentPassword);
+      const hashedNew = await hashPasswordSHA256(newPassword);
       const response = await api.put('/auth/change-password', {
-        currentPassword,
-        newPassword
+        currentPassword: hashedCurrent,
+        newPassword: hashedNew
       });
       toast.dismiss();
 
@@ -888,22 +1042,80 @@ export default function AdminDashboard() {
       let badgeColor = '';
 
       if (type === 'all') {
-        filteredUsers = allUsers;
+        allUsers.forEach(u => {
+          filteredUsers.push(u);
+          if (u.subUsers) {
+            u.subUsers.forEach(sub => {
+              filteredUsers.push({
+                username: `${u.username} (Sub-user)`,
+                name: `${sub.name} (Sub: ${sub.nakshatram})`,
+                phone: sub.phone || `Parent: ${u.phone}`,
+                email: `Parent: ${u.email || 'N/A'}`,
+                status: 'ACTIVE',
+                profilePhoto: sub.photo || null,
+                subscriptions: sub.subscriptionEndDate ? [{
+                  status: sub.subscriptionStatus,
+                  endDate: sub.subscriptionEndDate
+                }] : []
+              });
+            });
+          }
+        });
         reportTitle = 'All Registered Members Directory';
         badgeColor = '#0f172a';
       } else if (type === 'paid') {
-        filteredUsers = allUsers.filter(u => {
-          if (u.subscriptions.length === 0) return false;
-          const sub = u.subscriptions[0];
-          return sub.status === 'ACTIVE' && new Date(sub.endDate) >= now;
+        allUsers.forEach(u => {
+          const isUserPaid = u.subscriptions.length > 0 && u.subscriptions[0].status === 'ACTIVE' && new Date(u.subscriptions[0].endDate) >= now;
+          if (isUserPaid) {
+            filteredUsers.push(u);
+          }
+          if (u.subUsers) {
+            u.subUsers.forEach(sub => {
+              const isSubPaid = sub.subscriptionStatus === 'ACTIVE' && sub.subscriptionEndDate && new Date(sub.subscriptionEndDate) >= now;
+              if (isSubPaid) {
+                filteredUsers.push({
+                  username: `${u.username} (Sub-user)`,
+                  name: `${sub.name} (Sub: ${sub.nakshatram})`,
+                  phone: sub.phone || `Parent: ${u.phone}`,
+                  email: `Parent: ${u.email || 'N/A'}`,
+                  status: 'ACTIVE',
+                  profilePhoto: sub.photo || null,
+                  subscriptions: [{
+                    status: 'ACTIVE',
+                    endDate: sub.subscriptionEndDate
+                  }]
+                });
+              }
+            });
+          }
         });
         reportTitle = 'Active Paid Subscribers Directory';
         badgeColor = '#16a34a';
       } else if (type === 'unpaid') {
-        filteredUsers = allUsers.filter(u => {
-          if (u.subscriptions.length === 0) return true;
-          const sub = u.subscriptions[0];
-          return sub.status !== 'ACTIVE' || new Date(sub.endDate) < now;
+        allUsers.forEach(u => {
+          const isUserPaid = u.subscriptions.length > 0 && u.subscriptions[0].status === 'ACTIVE' && new Date(u.subscriptions[0].endDate) >= now;
+          if (!isUserPaid) {
+            filteredUsers.push(u);
+          }
+          if (u.subUsers) {
+            u.subUsers.forEach(sub => {
+              const isSubPaid = sub.subscriptionStatus === 'ACTIVE' && sub.subscriptionEndDate && new Date(sub.subscriptionEndDate) >= now;
+              if (!isSubPaid) {
+                filteredUsers.push({
+                  username: `${u.username} (Sub-user)`,
+                  name: `${sub.name} (Sub: ${sub.nakshatram})`,
+                  phone: sub.phone || `Parent: ${u.phone}`,
+                  email: `Parent: ${u.email || 'N/A'}`,
+                  status: 'INACTIVE',
+                  profilePhoto: sub.photo || null,
+                  subscriptions: sub.subscriptionEndDate ? [{
+                    status: sub.subscriptionStatus,
+                    endDate: sub.subscriptionEndDate
+                  }] : []
+                });
+              }
+            });
+          }
         });
         reportTitle = 'Unpaid & Expired Users Log';
         badgeColor = '#dc2626';
@@ -1123,18 +1335,76 @@ export default function AdminDashboard() {
 
       let filteredUsers = [];
       if (type === 'all') {
-        filteredUsers = allUsers;
+        allUsers.forEach(u => {
+          filteredUsers.push(u);
+          if (u.subUsers) {
+            u.subUsers.forEach(sub => {
+              filteredUsers.push({
+                username: `${u.username} (Sub-user)`,
+                name: `${sub.name} (Sub: ${sub.nakshatram})`,
+                phone: sub.phone || `Parent: ${u.phone}`,
+                email: `Parent: ${u.email || 'N/A'}`,
+                status: 'ACTIVE',
+                profilePhoto: sub.photo || null,
+                subscriptions: sub.subscriptionEndDate ? [{
+                  status: sub.subscriptionStatus,
+                  endDate: sub.subscriptionEndDate
+                }] : []
+              });
+            });
+          }
+        });
       } else if (type === 'paid') {
-        filteredUsers = allUsers.filter(u => {
-          if (u.subscriptions.length === 0) return false;
-          const sub = u.subscriptions[0];
-          return sub.status === 'ACTIVE' && new Date(sub.endDate) >= now;
+        allUsers.forEach(u => {
+          const isUserPaid = u.subscriptions.length > 0 && u.subscriptions[0].status === 'ACTIVE' && new Date(u.subscriptions[0].endDate) >= now;
+          if (isUserPaid) {
+            filteredUsers.push(u);
+          }
+          if (u.subUsers) {
+            u.subUsers.forEach(sub => {
+              const isSubPaid = sub.subscriptionStatus === 'ACTIVE' && sub.subscriptionEndDate && new Date(sub.subscriptionEndDate) >= now;
+              if (isSubPaid) {
+                filteredUsers.push({
+                  username: `${u.username} (Sub-user)`,
+                  name: `${sub.name} (Sub: ${sub.nakshatram})`,
+                  phone: sub.phone || `Parent: ${u.phone}`,
+                  email: `Parent: ${u.email || 'N/A'}`,
+                  status: 'ACTIVE',
+                  profilePhoto: sub.photo || null,
+                  subscriptions: [{
+                    status: 'ACTIVE',
+                    endDate: sub.subscriptionEndDate
+                  }]
+                });
+              }
+            });
+          }
         });
       } else if (type === 'unpaid') {
-        filteredUsers = allUsers.filter(u => {
-          if (u.subscriptions.length === 0) return true;
-          const sub = u.subscriptions[0];
-          return sub.status !== 'ACTIVE' || new Date(sub.endDate) < now;
+        allUsers.forEach(u => {
+          const isUserPaid = u.subscriptions.length > 0 && u.subscriptions[0].status === 'ACTIVE' && new Date(u.subscriptions[0].endDate) >= now;
+          if (!isUserPaid) {
+            filteredUsers.push(u);
+          }
+          if (u.subUsers) {
+            u.subUsers.forEach(sub => {
+              const isSubPaid = sub.subscriptionStatus === 'ACTIVE' && sub.subscriptionEndDate && new Date(sub.subscriptionEndDate) >= now;
+              if (!isSubPaid) {
+                filteredUsers.push({
+                  username: `${u.username} (Sub-user)`,
+                  name: `${sub.name} (Sub: ${sub.nakshatram})`,
+                  phone: sub.phone || `Parent: ${u.phone}`,
+                  email: `Parent: ${u.email || 'N/A'}`,
+                  status: 'INACTIVE',
+                  profilePhoto: sub.photo || null,
+                  subscriptions: sub.subscriptionEndDate ? [{
+                    status: sub.subscriptionStatus,
+                    endDate: sub.subscriptionEndDate
+                  }] : []
+                });
+              }
+            });
+          }
         });
       }
 
@@ -1309,11 +1579,25 @@ export default function AdminDashboard() {
     const successPayments = targets.filter(p => p.status === 'SUCCESS');
     const totalRev = successPayments.reduce((sum, p) => sum + p.amount, 0);
     
-    const plans = { '1month': 0, '3month': 0, '6month': 0 };
+    const plans = { '1month': 0, '3month': 0, '6month': 0, '12month': 0 };
     successPayments.forEach(p => {
-      if (p.amount === 1770) plans['1month']++;
-      else if (p.amount === 5310) plans['3month']++;
-      else if (p.amount === 10620) plans['6month']++;
+      let count = 1;
+      if (p.metadata) {
+        try {
+          const parsed = JSON.parse(p.metadata);
+          const paySelf = parsed.paySelf !== undefined ? parsed.paySelf : true;
+          const subUserIds = parsed.subUserIds || [];
+          count = (paySelf ? 1 : 0) + subUserIds.length;
+        } catch (err) {}
+      }
+      if (count <= 0) count = 1;
+
+      const perUserAmount = p.amount / count;
+
+      if (perUserAmount === 1770 || perUserAmount === 1800) plans['1month'] += count;
+      else if (perUserAmount === 5310 || perUserAmount === 5400) plans['3month'] += count;
+      else if (perUserAmount === 10620 || perUserAmount === 10800) plans['6month'] += count;
+      else if (perUserAmount === 21240 || perUserAmount === 21600) plans['12month'] += count;
     });
 
     return {
@@ -1328,7 +1612,8 @@ export default function AdminDashboard() {
 
   return (
     <div style={{
-      minHeight: '100vh',
+      height: '100vh',
+      overflow: 'hidden',
       background: '#f4f7f6',
       fontFamily: 'var(--font-body)',
       color: 'var(--color-primary-dark)',
@@ -1448,13 +1733,12 @@ export default function AdminDashboard() {
         </aside>
       )}
 
-      {/* Main Content Area */}
       <div style={{ 
         display: 'flex', 
         flexDirection: 'column', 
         flex: 1, 
-        height: isMobile ? 'auto' : '100vh', 
-        overflow: isMobile ? 'visible' : 'hidden' 
+        height: isMobile ? 'calc(100vh - 70px)' : '100vh', 
+        overflow: 'hidden' 
       }}>
         {/* Top Header Bar (Desktop only) */}
         {!isMobile && (
@@ -1491,11 +1775,10 @@ export default function AdminDashboard() {
           </header>
         )}
 
-        {/* Scrollable Content Container */}
         <div style={{ 
           flex: 1, 
-          padding: isMobile ? '20px 15px' : '40px', 
-          overflowY: isMobile ? 'visible' : 'auto', 
+          padding: isMobile ? '16px 12px' : '40px', 
+          overflowY: 'auto', 
           background: '#f8fafc' 
         }}>
         
@@ -1603,6 +1886,26 @@ export default function AdminDashboard() {
                   }}
                 >
                   + Add User / Send Link
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenBulkModal}
+                  style={{
+                    padding: '8px 16px',
+                    background: '#0ea5e9',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '0.82rem',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  👥 Bulk Add Users
                 </button>
                 <button
                   type="button"
@@ -1779,9 +2082,32 @@ export default function AdminDashboard() {
                   {users.map(u => (
                     <tr key={u.id} style={{ borderBottom: '1px solid #eee' }}>
                       <td style={{ padding: '15px', fontWeight: '600' }}>{u.username}</td>
-                      <td style={{ padding: '15px' }}>
+                       <td style={{ padding: '15px' }}>
                         <div>{u.name}</div>
                         <div style={{ fontSize: '0.8rem', color: '#777' }}>{u.phone}</div>
+                        {u.subUsers && u.subUsers.length > 0 && (
+                          <div style={{ marginTop: '8px', borderTop: '1px dashed #eee', paddingTop: '6px' }}>
+                            <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--color-primary-medium)', marginBottom: '4px' }}>Sub-members:</div>
+                            {u.subUsers.map(sub => (
+                              <div key={sub.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: '#555', margin: '2px 0' }}>
+                                {sub.photo ? (
+                                  <img src={sub.photo} style={{ width: '16px', height: '16px', borderRadius: '50%', objectFit: 'cover' }} alt="" />
+                                ) : (
+                                  <span>👤</span>
+                                )}
+                                <span>{sub.name} ({sub.nakshatram})</span>
+                                <span style={{
+                                  fontSize: '0.65rem',
+                                  padding: '1px 5px',
+                                  borderRadius: '10px',
+                                  fontWeight: 'bold',
+                                  backgroundColor: sub.subscriptionStatus === 'ACTIVE' ? '#dcfce7' : '#fee2e2',
+                                  color: sub.subscriptionStatus === 'ACTIVE' ? '#15803d' : '#b91c1c'
+                                }}>{sub.subscriptionStatus}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: '15px' }}>{u.email || 'N/A'}</td>
                       <td style={{ padding: '15px' }}>
@@ -2080,6 +2406,266 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
+
+            {/* BULK CREATE USERS MODAL */}
+            {showBulkUserModal && (
+              <div style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                width: '100vw',
+                height: '100vh',
+                background: 'rgba(0, 0, 0, 0.5)',
+                backdropFilter: 'blur(3px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 999
+              }}>
+                <div style={{
+                  background: '#fff',
+                  borderRadius: '12px',
+                  width: '95%',
+                  maxWidth: '900px',
+                  maxHeight: '90vh',
+                  overflowY: 'auto',
+                  padding: isMobile ? '20px 15px' : '30px',
+                  boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
+                }}>
+                  {bulkResult ? (
+                    // Bulk Registration Results View
+                    <div>
+                      <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '20px', color: '#16a34a', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                        Bulk Registration Completed!
+                      </h3>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                        <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', border: '1px solid #bbf7d0', textAlign: 'center' }}>
+                          <span style={{ display: 'block', fontSize: '0.82rem', color: '#15803d', fontWeight: 'bold' }}>SUCCESSFULLY REGISTERED</span>
+                          <span style={{ fontSize: '2rem', fontWeight: '800', color: '#16a34a' }}>{bulkResult.registeredCount}</span>
+                        </div>
+                        <div style={{ background: bulkResult.failedCount > 0 ? '#fef2f2' : '#f8fafc', padding: '16px', borderRadius: '8px', border: bulkResult.failedCount > 0 ? '1px solid #fecaca' : '1px solid #e2e8f0', textAlign: 'center' }}>
+                          <span style={{ display: 'block', fontSize: '0.82rem', color: bulkResult.failedCount > 0 ? '#991b1b' : '#64748b', fontWeight: 'bold' }}>FAILED CREATIONS</span>
+                          <span style={{ fontSize: '2rem', fontWeight: '800', color: bulkResult.failedCount > 0 ? '#ef4444' : '#64748b' }}>{bulkResult.failedCount}</span>
+                        </div>
+                      </div>
+
+                      {bulkResult.successUsers.length > 0 && (
+                        <div style={{ marginBottom: '20px' }}>
+                          <h4 style={{ fontSize: '0.92rem', fontWeight: 'bold', color: '#16a34a', marginBottom: '10px' }}>Registered Accounts</h4>
+                          <div style={{ overflowX: 'auto', maxHeight: '200px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                              <thead>
+                                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                  <th style={{ padding: '8px', textAlign: 'left' }}>Name</th>
+                                  <th style={{ padding: '8px', textAlign: 'left' }}>Username</th>
+                                  <th style={{ padding: '8px', textAlign: 'left' }}>WhatsApp</th>
+                                  <th style={{ padding: '8px', textAlign: 'left' }}>Temp Password</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {bulkResult.successUsers.map((su, idx) => (
+                                  <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                    <td style={{ padding: '8px' }}>{su.name}</td>
+                                    <td style={{ padding: '8px', fontWeight: 'bold', color: 'var(--color-primary-medium)' }}>{su.username}</td>
+                                    <td style={{ padding: '8px' }}>{su.phone}</td>
+                                    <td style={{ padding: '8px', color: '#d97706', fontFamily: 'monospace' }}>{su.temporaryPassword || '(Provided)'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {bulkResult.failedUsers.length > 0 && (
+                        <div style={{ marginBottom: '20px' }}>
+                          <h4 style={{ fontSize: '0.92rem', fontWeight: 'bold', color: '#ef4444', marginBottom: '10px' }}>Failed Entries</h4>
+                          <div style={{ overflowX: 'auto', maxHeight: '200px', border: '1px solid #fecaca', borderRadius: '6px' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                              <thead>
+                                <tr style={{ background: '#fef2f2', borderBottom: '1px solid #fecaca' }}>
+                                  <th style={{ padding: '8px', textAlign: 'left' }}>Name</th>
+                                  <th style={{ padding: '8px', textAlign: 'left' }}>WhatsApp</th>
+                                  <th style={{ padding: '8px', textAlign: 'left' }}>Error Message</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {bulkResult.failedUsers.map((fu, idx) => (
+                                  <tr key={idx} style={{ borderBottom: '1px solid #fecaca' }}>
+                                    <td style={{ padding: '8px' }}>{fu.name}</td>
+                                    <td style={{ padding: '8px' }}>{fu.phone}</td>
+                                    <td style={{ padding: '8px', color: '#ef4444', fontWeight: '500' }}>{fu.error}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowBulkUserModal(false);
+                            setBulkResult(null);
+                          }}
+                          style={{ padding: '10px 20px', background: 'var(--color-primary-medium)', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}
+                        >
+                          Done & Close
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    // Bulk Form Editor
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px', flexWrap: 'wrap', gap: '10px' }}>
+                        <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', margin: 0, color: 'var(--color-primary-dark)' }}>
+                          Bulk Register User Accounts
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={handleAddBulkRow}
+                          style={{ padding: '6px 12px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '6px', fontWeight: '600', fontSize: '0.8rem', cursor: 'pointer' }}
+                        >
+                          ➕ Add Row
+                        </button>
+                      </div>
+
+                      {/* EXCEL UPLOAD BOX */}
+                      <div style={{
+                        background: '#f8fafc',
+                        border: '1px dashed #cbd5e1',
+                        borderRadius: '8px',
+                        padding: '16px',
+                        marginBottom: '20px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        textAlign: 'center'
+                      }}>
+                        <p style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#64748b', fontWeight: '500' }}>
+                          ⚡ Quick Import: Upload an Excel (.xlsx, .xls) or CSV (.csv) file
+                        </p>
+                        <input
+                          type="file"
+                          accept=".xlsx, .xls, .csv"
+                          onChange={handleExcelUpload}
+                          style={{
+                            fontSize: '0.8rem',
+                            color: '#64748b',
+                            cursor: 'pointer'
+                          }}
+                        />
+                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '6px' }}>
+                          * Must contain column headers named <strong>"Name"</strong> and <strong>"Phone"</strong> (Password & Email are optional).
+                        </span>
+                      </div>
+
+                      <form onSubmit={handleSaveBulkUsers}>
+                        <div style={{ overflowX: 'auto', marginBottom: '20px', maxHeight: '50vh', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                            <thead>
+                              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 5 }}>
+                                <th style={{ padding: '10px', width: '40px', textAlign: 'center' }}>#</th>
+                                <th style={{ padding: '10px', textAlign: 'left' }}>Full Name <span style={{ color: 'red' }}>*</span></th>
+                                <th style={{ padding: '10px', textAlign: 'left' }}>Mobile Number <span style={{ color: 'red' }}>*</span></th>
+                                <th style={{ padding: '10px', textAlign: 'left' }}>Password (Optional)</th>
+                                <th style={{ padding: '10px', textAlign: 'left' }}>Email (Optional)</th>
+                                <th style={{ padding: '10px', width: '50px', textAlign: 'center' }}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {bulkUsersList.map((bu, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                  <td style={{ padding: '10px', textAlign: 'center', fontWeight: '600', color: '#64748b' }}>{idx + 1}</td>
+                                  <td style={{ padding: '10px' }}>
+                                    <input
+                                      type="text"
+                                      value={bu.name}
+                                      onChange={(e) => handleBulkUserChange(idx, 'name', e.target.value)}
+                                      placeholder="e.g. Sanjay Kumar"
+                                      required
+                                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: '10px' }}>
+                                    <input
+                                      type="text"
+                                      value={bu.phone}
+                                      onChange={(e) => handleBulkUserChange(idx, 'phone', e.target.value)}
+                                      placeholder="e.g. 9876543210"
+                                      required
+                                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: '10px' }}>
+                                    <input
+                                      type="password"
+                                      value={bu.password}
+                                      onChange={(e) => handleBulkUserChange(idx, 'password', e.target.value)}
+                                      placeholder="Auto-generated if empty"
+                                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: '10px' }}>
+                                    <input
+                                      type="email"
+                                      value={bu.email}
+                                      onChange={(e) => handleBulkUserChange(idx, 'email', e.target.value)}
+                                      placeholder="e.g. user@gmail.com"
+                                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none' }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: '10px', textAlign: 'center' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveBulkRow(idx)}
+                                      style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: '1.2rem', cursor: 'pointer', outline: 'none' }}
+                                      title="Remove user row"
+                                    >
+                                      🗑️
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={handleAddBulkRow}
+                            style={{ padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '6px', fontWeight: '600', fontSize: '0.85rem', cursor: 'pointer' }}
+                          >
+                            ➕ Add Another Row
+                          </button>
+                          
+                          <div style={{ display: 'flex', gap: '10px' }}>
+                            <button
+                              type="button"
+                              onClick={() => setShowBulkUserModal(false)}
+                              style={{ padding: '10px 20px', background: '#f1f5f9', color: '#1e293b', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              style={{ padding: '10px 20px', background: 'var(--color-primary-medium)', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}
+                            >
+                              Register All Users
+                            </button>
+                          </div>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2191,16 +2777,20 @@ export default function AdminDashboard() {
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                    <span style={{ color: '#555', fontWeight: '500' }}>1 Month (₹1,770):</span>
+                    <span style={{ color: '#555', fontWeight: '500' }}>1 Month (₹1,800):</span>
                     <span style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)' }}>{monthStats.plans['1month']} sold</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                    <span style={{ color: '#555', fontWeight: '500' }}>3 Month (₹5,310):</span>
+                    <span style={{ color: '#555', fontWeight: '500' }}>3 Month (₹5,400):</span>
                     <span style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)' }}>{monthStats.plans['3month']} sold</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                    <span style={{ color: '#555', fontWeight: '500' }}>6 Month (₹10,620):</span>
+                    <span style={{ color: '#555', fontWeight: '500' }}>6 Month (₹10,800):</span>
                     <span style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)' }}>{monthStats.plans['6month']} sold</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                    <span style={{ color: '#555', fontWeight: '500' }}>12 Month (₹21,600):</span>
+                    <span style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)' }}>{monthStats.plans['12month']} sold</span>
                   </div>
                 </div>
               </div>

@@ -399,3 +399,17 @@
     color: rgba(255, 255, 255, 0.7);
     font-size: 0.95rem;
 }
+
+@media (max-width: 768px) {
+    .shared-about-section {
+        padding: 36px 20px !important;
+    }
+    
+    .shared-gallery-section {
+        padding: 36px 20px !important;
+    }
+    
+    .shared-gallery-header {
+        margin-bottom: 24px !important;
+    }
+}

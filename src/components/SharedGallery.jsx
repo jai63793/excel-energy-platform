@@ -6,12 +6,12 @@ import './SharedComponents.css';
 // Ensure ScrollTrigger is registered
 gsap.registerPlugin(ScrollTrigger);
 
-export default function SharedGallery({ title = "Gallery Showcase", tagline = "VISUAL GLIMPSES", images = [], isSandBg = false }) {
+export default function SharedGallery({ title = "Gallery Showcase", tagline = "VISUAL GLIMPSES", images = [], isSandBg = false, onCardClick = null }) {
     const [lightboxIndex, setLightboxIndex] = useState(null);
     const [isOpen, setIsOpen] = useState(false);
     const gridRef = useRef(null);
     const sectionRef = useRef(null);
-
+ 
     // Initial GSAP reveal animations when scrolled into view
     useEffect(() => {
         const ctx = gsap.context(() => {
@@ -107,7 +107,14 @@ export default function SharedGallery({ title = "Gallery Showcase", tagline = "V
                         <div 
                             key={idx} 
                             className="shared-gallery-card"
-                            onClick={() => handleOpen(idx)}
+                            onClick={() => {
+                                if (onCardClick) {
+                                    onCardClick(img, idx);
+                                } else {
+                                    handleOpen(idx);
+                                }
+                            }}
+                            style={{ cursor: 'pointer' }}
                         >
                             <img src={img.src} alt={img.title} className="shared-gallery-card-img" />
                             <div className="shared-gallery-zoom-icon">

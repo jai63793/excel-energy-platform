@@ -22,6 +22,7 @@ import {
   getAdminBookings,
   registerUserWithPaymentLink,
   createAdminUser,
+  createBulkAdminUsers,
   updateAdminUser,
   assignBookingHealer,
   verifyPaymentLinkStatusManual
@@ -42,6 +43,7 @@ router.get('/stats', getDashboardStats);
 // 2. User Accounts Management
 router.get('/users', getUsers);
 router.post('/users', createAdminUser);
+router.post('/users/bulk', createBulkAdminUsers);
 router.put('/users/:id', updateAdminUser);
 router.get('/users/:id', getUserDetails);
 router.put('/users/suspend/:id', suspendUser);

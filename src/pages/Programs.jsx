@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import gsap from 'gsap';
 import { servicesData } from '../data/servicesData';
 import SharedAbout from '../components/SharedAbout';
@@ -17,11 +17,11 @@ const getCourseImageUrl = (name) => {
     return new URL(`../assets/images/heal-course/${name}`, import.meta.url).href;
 };
 
-const PROGRAMS_GALLERY_IMAGES = [
-    { src: getServiceImageUrl('advanced_physical_healing.png'), title: 'Advanced Physical Healing', category: 'Therapy', description: 'Treating chronic conditions using specialized color prana protocols.' },
-    { src: getServiceImageUrl('complex_psychological_healing.png'), title: 'Complex Psychological Healing', category: 'Psychotherapy', description: 'Deep emotional cleansing to resolve longstanding trauma.' },
-    { src: getServiceImageUrl('healing_for_businesses.png'), title: 'Healing for Businesses', category: 'Business', description: 'Cleansing group and organizational wellness energy fields.' },
-    { src: getServiceImageUrl('healing_for_profession.png'), title: 'Healing for Profession', category: 'Career', description: 'Charging vital throat and solar plexus chakras to restore clarity.' }
+const COURSES_GALLERY_IMAGES = [
+    { src: getCourseImageUrl('04_advanced_pranic_healing.png'), title: 'Advanced Pranic Healing Class', category: 'Classroom', description: 'Advanced color prana methodologies for severe physical conditions.' },
+    { src: getCourseImageUrl('05_pranic_psychotherapy.png'), title: 'Pranic Psychotherapy Group', category: 'Psychotherapy', description: 'Practical training on chakra cleansing for emotional and mental health.' },
+    { src: getCourseImageUrl('08_pranic_psychic_self_defence.png'), title: 'Self-Defence Training', category: 'Self-Defence', description: 'Creating shields and protecting against negative energetic contamination.' },
+    { src: getCourseImageUrl('10_achieving_oneness.png'), title: 'Achieving Oneness Study', category: 'Meditation', description: 'Deep meditation for soul alignment and inner peace.' }
 ];
 
 const CATEGORIES = [
@@ -37,6 +37,7 @@ export default function Programs() {
     const [filteredServices, setFilteredServices] = useState(servicesData);
     const [selectedService, setSelectedService] = useState(null);
     const location = useLocation();
+    const navigate = useNavigate();
     const gridRef = useRef(null);
     const [animateGrid, setAnimateGrid] = useState(false);
     const mainSectionRef = useRef(null);
@@ -50,6 +51,14 @@ export default function Programs() {
             if (svc) {
                 targetServiceId = svc.id;
             }
+        } else if (location.state && location.state.category) {
+            setTimeout(() => {
+                setSelectedCategory(location.state.category);
+                const results = servicesData.filter(s => s.category === location.state.category);
+                setFilteredServices(results);
+                setSelectedService(null);
+            }, 0);
+            return;
         } else {
             const params = new URLSearchParams(location.search);
             const idParam = params.get('id');
@@ -287,9 +296,13 @@ export default function Programs() {
 
                     {/* Premium Service Modal Overlay */}
                     {selectedService && (
-                        <div className="service-modal-overlay" onClick={() => setSelectedService(null)}>
+                        <div className="service-modal-overlay" onClick={() => {
+                            setSelectedService(null);
+                        }}>
                             <div className="service-modal-content" onClick={(e) => e.stopPropagation()}>
-                                <button className="service-modal-close" onClick={() => setSelectedService(null)} aria-label="Close modal">&times;</button>
+                                <button className="service-modal-close" onClick={() => {
+                                    setSelectedService(null);
+                                }} aria-label="Close modal">&times;</button>
                                 <div className="service-modal-body">
                                     <div className="service-modal-image-wrapper">
                                         <img 
@@ -311,16 +324,55 @@ export default function Programs() {
                                                 <strong>Ideal For:</strong> {selectedService.idealFor}
                                             </div>
                                         )}
+
+                                        {/* 8 Miracles Available link */}
+                                        {!['09', '10', '12'].includes(selectedService.id) && (
+                                            <div style={{ marginBottom: '16px', borderTop: '1px solid rgba(8, 50, 38, 0.05)', paddingTop: '16px', display: 'flex' }}>
+                                                <a 
+                                                    href={`#/miraclesbooking?service=${selectedService.id}`}
+                                                    onClick={() => setSelectedService(null)}
+                                                    style={{
+                                                        background: 'none',
+                                                        border: 'none',
+                                                        color: 'var(--color-accent)',
+                                                        padding: '0',
+                                                        fontSize: '0.92rem',
+                                                        fontWeight: '600',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px',
+                                                        cursor: 'pointer',
+                                                        textDecoration: 'underline'
+                                                    }}
+                                                >
+                                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                                    </svg>
+                                                    <span>8 Miracles Healing Available</span>
+                                                </a>
+                                            </div>
+                                        )}
                                         
-                                        <div style={{ marginTop: 'auto', display: 'flex', gap: '16px' }}>
+                                        <div className="service-modal-actions" style={{ marginTop: 'auto', display: 'flex', gap: '10px', flexWrap: 'nowrap', width: '100%' }}>
                                             <Link 
-                                                to="/contact" 
+                                                to={`/contact?service=${encodeURIComponent(selectedService.title)}`}
                                                 state={{ selectedService: selectedService.title }}
                                                 className="btn-primary"
-                                                style={{ display: 'inline-flex', padding: '14px 28px' }}
+                                                style={{ display: 'inline-flex', flex: 1, padding: '10px 14px', fontSize: '0.85rem', justifyContent: 'center', alignItems: 'center', whiteSpace: 'nowrap' }}
                                             >
-                                                <span>Book Appointment</span>
-                                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginLeft: '8px' }}>
+                                                <span>Book Now</span>
+                                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginLeft: '4px' }}>
+                                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                                    <polyline points="12 5 19 12 12 19"></polyline>
+                                                </svg>
+                                            </Link>
+                                            <Link 
+                                                to="/join-member" 
+                                                className="btn-secondary"
+                                                style={{ display: 'inline-flex', flex: 1, padding: '10px 14px', fontSize: '0.85rem', justifyContent: 'center', alignItems: 'center', whiteSpace: 'nowrap' }}
+                                            >
+                                                <span>Join Member</span>
+                                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginLeft: '4px' }}>
                                                     <line x1="5" y1="12" x2="19" y2="12"></line>
                                                     <polyline points="12 5 19 12 12 19"></polyline>
                                                 </svg>
@@ -350,10 +402,10 @@ export default function Programs() {
             />
 
             <SharedGallery
-                tagline="THERAPY & AURA SCANNING"
-                title="Healing Services Showcase"
-                images={PROGRAMS_GALLERY_IMAGES}
-                isSandBg={false}
+                tagline="CLASSROOM & PRACTICE"
+                title="Training & Study Groups"
+                images={COURSES_GALLERY_IMAGES}
+                isSandBg={true}
             />
         </div>
     );

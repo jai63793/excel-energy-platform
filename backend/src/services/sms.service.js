@@ -195,8 +195,15 @@ export const sendBroadcastSMS = async (phone, userName, title, description) => {
     try {
       // The template parameters are: Name, Title, Description (e.g. "Vikas,Title,Description")
       // Remove commas from title and description to prevent Scopycode parser confusion if they use comma-split
-      const cleanTitle = title.replace(/,/g, ' ');
-      const cleanDesc = description.replace(/,/g, ' ');
+      const suffix = '\n\nTo view and manage your notifications, log in to your dashboard at: https://excelenergy.com';
+      const truncatedTitle = title && title.length > 100 ? title.substring(0, 97) + '...' : title;
+      const truncatedDesc = description && description.length > (500 - suffix.length)
+        ? description.substring(0, (500 - suffix.length) - 3) + '...'
+        : description;
+      const finalDesc = `${truncatedDesc}${suffix}`;
+
+      const cleanTitle = truncatedTitle.replace(/,/g, ' ');
+      const cleanDesc = finalDesc.replace(/,/g, ' ');
       const paramValue = `${name},${cleanTitle},${cleanDesc}`;
 
       const params = {

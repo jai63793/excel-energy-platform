@@ -17,11 +17,12 @@ const getServiceImageUrl = (name) => {
 
 const HOME_SERVICES = [
     {
-        index: 0, // Maps to 'Simple Physical Healing'
-        title: 'Simple Physical Healing',
-        tagline: 'EVERYDAY PHYSICAL RECOVERY',
-        desc: 'Relieve acute and chronic physical ailments through targeted energy scanning and cleansing, promoting rapid healing.',
-        image: getServiceImageUrl('simple_physical_healing.png'),
+        type: 'category',
+        category: 'physical',
+        title: 'Physical Healing',
+        tagline: 'CHRONIC & PHYSICAL RECOVERY',
+        desc: 'Comprehensive energy healing addressing common ailments as well as chronic and serious illnesses.',
+        image: getServiceImageUrl('physical_healing.png'),
         icon: (
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
@@ -29,11 +30,12 @@ const HOME_SERVICES = [
         )
     },
     {
-        index: 2, // Maps to 'Simple Psychological Healing'
-        title: 'Simple Psychological Healing',
-        tagline: 'EMOTIONAL BALANCE & ANXIETY RELIEF',
-        desc: 'Cleanse governing emotional chakras to restore stability, alleviate stress, anxiety, and release emotional burdens.',
-        image: getServiceImageUrl('simple_psychological_healing.png'),
+        type: 'category',
+        category: 'psychological',
+        title: 'Psychological Healing',
+        tagline: 'EMOTIONAL HARMONY & TRAUMA RECOVERY',
+        desc: 'Direct energy psychotherapy targeting stress, anxiety, longstanding depression, phobias, and deep trauma.',
+        image: getServiceImageUrl('psychological_healing.png'),
         icon: (
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M12 2a5 5 0 0 0-5 5v3.18a3 3 0 0 0 3 3h4a3 3 0 0 0 3-3V7a5 5 0 0 0-5-5z" />
@@ -43,10 +45,41 @@ const HOME_SERVICES = [
         )
     },
     {
-        index: 5, // Maps to 'Financial Healing'
+        type: 'category',
+        category: 'prosperity',
+        title: 'Prosperity & Career',
+        tagline: 'ABUNDANCE & BUSINESS ALIGNMENT',
+        desc: 'Systematic clearing of financial blocks, career stagnation, and revitalization of business energy bodies.',
+        image: getServiceImageUrl('prosperity_career.png'),
+        icon: (
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+            </svg>
+        )
+    },
+    {
+        type: 'category',
+        category: 'special',
+        title: 'Special Therapies',
+        tagline: 'CRYSTAL & ESOTERIC HEALING',
+        desc: 'Advanced modalities including laying of consecrated crystal layouts and esoterically grounded spiritual guidance.',
+        image: getServiceImageUrl('special_therapies.png'),
+        icon: (
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5" />
+                <line x1="12" y1="22" x2="12" y2="2" />
+                <line x1="2" y1="8.5" x2="22" y2="8.5" />
+                <line x1="2" y1="15.5" x2="22" y2="15.5" />
+            </svg>
+        )
+    },
+    {
+        type: 'service',
+        index: 5,
         title: 'Financial Healing',
-        tagline: 'ABUNDANCE & PROSPERITY ENERGY',
-        desc: 'Clear energetic roadblocks to wealth creation, dissolve limiting beliefs, and manifest prosperity and flow.',
+        tagline: 'KRIYASHAKTI ABUNDANCE SYSTEM',
+        desc: 'Targeted clearing of scarcity consciousness and negative thought forms to manifest financial flow.',
         image: getServiceImageUrl('financial_healing.png'),
         icon: (
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -56,10 +89,11 @@ const HOME_SERVICES = [
         )
     },
     {
-        index: 9, // Maps to 'Bio-Well GDV Scanning'
+        type: 'service',
+        index: 9,
         title: 'Bio-Well GDV Scanning',
         tagline: 'ENERGY AUDIT & AURA ANALYSIS',
-        desc: 'Get a scientifically validated aura scan mapping fingertip GDV, chakra activity levels, and organ vitality indices.',
+        desc: 'Non-invasive Gas Discharge Visualization fingertip scanning mapping organ vitality indices and chakra levels.',
         image: getServiceImageUrl('bio_well_gdv_scanning.png'),
         icon: (
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -179,6 +213,37 @@ export default function Home() {
         }
     ];
 
+    const [isMobile, setIsMobile] = useState(false);
+    const [currentCenterIndex, setCurrentCenterIndex] = useState(0);
+
+    // Detect mobile screen width
+    useEffect(() => {
+        const handleResize = () => {
+            setIsMobile(window.innerWidth <= 768);
+        };
+        handleResize();
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    // Auto-slide mobile category carousel
+    useEffect(() => {
+        if (!isMobile) return;
+        const timer = setInterval(() => {
+            setCurrentCenterIndex((prev) => (prev + 1) % categories.length);
+        }, 3000);
+        return () => clearInterval(timer);
+    }, [isMobile, categories.length]);
+
+    // Calculate shortest distance in a circular array
+    const getOffset = (index) => {
+        let diff = index - currentCenterIndex;
+        const half = Math.floor(categories.length / 2);
+        if (diff > half) diff -= categories.length;
+        if (diff < -half) diff += categories.length;
+        return diff;
+    };
+
     // Staggered reveals and scroll animations inside React scope
     useEffect(() => {
         const ctx = gsap.context(() => {
@@ -228,7 +293,7 @@ export default function Home() {
             );
 
             // ScrollTrigger animation to reveal solution category icons when user scrolls
-            gsap.fromTo('.hero-category-item',
+            gsap.fromTo('.hero-categories-carousel:not(.mobile-carousel) .hero-category-item',
                 { opacity: 0, scale: 0.85, y: 20 },
                 {
                     scrollTrigger: {
@@ -296,22 +361,44 @@ export default function Home() {
                     ease: 'back.out(1.5)'
                 }, 0.4);
 
-            // ScrollTrigger stagger reveal for home services cards
-            gsap.fromTo('.home-service-card', {
-                y: 50,
-                opacity: 0
-            }, {
-                scrollTrigger: {
-                    trigger: '.home-services-grid',
-                    start: 'top 80%'
-                },
-                y: 0,
-                opacity: 1,
-                duration: 0.8,
-                stagger: 0.15,
-                ease: 'power3.out',
-                clearProps: 'opacity,transform'
-            });
+            // ScrollTrigger stagger reveal for home services cards (with mobile stacking scroll animation)
+            if (window.innerWidth <= 768) {
+                const cards = gsap.utils.toArray('.home-service-card');
+                cards.forEach((card) => {
+                    gsap.fromTo(card, {
+                        y: 100,
+                        opacity: 0,
+                        scale: 0.92
+                    }, {
+                        scrollTrigger: {
+                            trigger: card,
+                            start: 'top 92%',
+                            end: 'top 60%',
+                            scrub: 1
+                        },
+                        y: 0,
+                        opacity: 1,
+                        scale: 1,
+                        ease: 'power2.out'
+                    });
+                });
+            } else {
+                gsap.fromTo('.home-service-card', {
+                    y: 50,
+                    opacity: 0
+                }, {
+                    scrollTrigger: {
+                        trigger: '.home-services-grid',
+                        start: 'top 80%'
+                    },
+                    y: 0,
+                    opacity: 1,
+                    duration: 0.8,
+                    stagger: 0.15,
+                    ease: 'power3.out',
+                    clearProps: 'opacity,transform'
+                });
+            }
 
 
 
@@ -347,12 +434,25 @@ export default function Home() {
                         <h1 className="hero-title">
                             <span className="hero-title-line-mask">
                                 <span className="hero-title-line-content">
-                                    Experience the Miracles
+                                    Experience the&nbsp;
                                 </span>
                             </span>
+                            <br className="mobile-only-br" />
                             <span className="hero-title-line-mask">
                                 <span className="hero-title-line-content">
-                                    Through Pranic Healing
+                                    Miracles&nbsp;
+                                </span>
+                            </span>
+                            <br className="desktop-only-br" />
+                            <span className="hero-title-line-mask">
+                                <span className="hero-title-line-content">
+                                    Through&nbsp;
+                                </span>
+                            </span>
+                            <br className="mobile-only-br" />
+                            <span className="hero-title-line-mask">
+                                <span className="hero-title-line-content">
+                                    Pranic Healing
                                 </span>
                             </span>
                         </h1>
@@ -378,19 +478,34 @@ export default function Home() {
                         }}>
                             Find a Solution
                         </h2>
-                        <div className="hero-categories-carousel">
-                            {categories.map((cat) => (
-                                <div
-                                    key={cat.id}
-                                    className="hero-category-item"
-                                    style={{ cursor: 'default' }}
-                                >
-                                    <div className="hero-category-circle">
-                                        {cat.icon}
+                        <div className={`hero-categories-carousel ${isMobile ? 'mobile-carousel' : ''}`}>
+                            {categories.map((cat, index) => {
+                                const offset = isMobile ? getOffset(index) : 0;
+                                const isVisible = !isMobile || Math.abs(offset) <= 1;
+
+                                return (
+                                    <div
+                                        key={cat.id}
+                                        className={`hero-category-item ${offset === 0 && isMobile ? 'active-pop' : ''}`}
+                                        style={isMobile ? {
+                                            cursor: 'default',
+                                            position: 'absolute',
+                                            left: '50%',
+                                            ...(offset !== 0 ? {
+                                                transform: `translate(calc(-50% + ${offset * 105}px), 0) scale(0.85)`
+                                            } : {}),
+                                            opacity: isVisible ? (offset === 0 ? 1 : 0.6) : 0,
+                                            pointerEvents: offset === 0 ? 'auto' : 'none',
+                                            zIndex: offset === 0 ? 2 : 1
+                                        } : { cursor: 'default' }}
+                                    >
+                                        <div className="hero-category-circle">
+                                            {cat.icon}
+                                        </div>
+                                        <span className="hero-category-label">{cat.label}</span>
                                     </div>
-                                    <span className="hero-category-label">{cat.label}</span>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 </div>
@@ -517,13 +632,13 @@ export default function Home() {
                                     The key to prosperity is in giving. If you want to be rich and prosperous, you have to practice generosity and non-stealing first.
                                 </p>
                             </div>
-                            <div className="quote-card-item">
+                            <div className="quote-card-item mobile-hide-quote">
                                 <span className="quote-quote-icon">“</span>
                                 <p className="quote-text">
                                     According to the Law of Cycle, everything is subject to change. Nothing lasts forever.
                                 </p>
                             </div>
-                            <div className="quote-card-item">
+                            <div className="quote-card-item mobile-hide-quote">
                                 <span className="quote-quote-icon">“</span>
                                 <p className="quote-text">
                                     What is impossible for an ordinary person is possible with the blessings of God, the Guru, and the higher beings.
@@ -550,9 +665,15 @@ export default function Home() {
                     <div className="home-services-grid">
                         {HOME_SERVICES.map((svc) => (
                             <div
-                                key={svc.index}
+                                key={svc.title}
                                 className="home-service-card"
-                                onClick={() => navigate('/services', { state: { serviceIndex: svc.index } })}
+                                onClick={() => {
+                                    if (svc.type === 'category') {
+                                        navigate('/services', { state: { category: svc.category } });
+                                    } else {
+                                        navigate('/services', { state: { serviceIndex: svc.index } });
+                                    }
+                                }}
                             >
                                 <div className="home-service-card-image-wrapper">
                                     <img src={svc.image} alt={svc.title} className="home-service-card-image" />

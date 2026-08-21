@@ -64,7 +64,7 @@ export const validateOTPVerify = validateBody({
 
 export const validateContactForm = validateBody({
   name: { required: true, type: 'string', minLength: 2, maxLength: 100 },
-  email: { required: true, type: 'string', regex: emailRegex },
+  email: { required: false, type: 'string', regex: emailRegex },
   phone: { required: true, type: 'string', regex: phoneRegex },
   message: { required: true, type: 'string', minLength: 5 }
 });
@@ -78,6 +78,7 @@ export const validatePasswordRegister = validateBody({
   name: { required: true, type: 'string', minLength: 2, maxLength: 100 },
   phone: { required: true, type: 'string', regex: phoneRegex },
   password: { required: true, type: 'string', minLength: 6 },
+  otpCode: { required: true, type: 'string', minLength: 6, maxLength: 6 },
   email: { required: false, type: 'string', regex: emailRegex },
   address: { required: false, type: 'string' },
   profilePhoto: { required: false, type: 'string' }

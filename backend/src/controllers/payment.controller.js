@@ -34,27 +34,39 @@ const generateUniqueUsername = async (name) => {
  */
 export const createOrder = async (req, res, next) => {
   const userId = req.user.id;
-  const { plan } = req.body;
+  const { plan, subUserIds = [], paySelf = true } = req.body;
 
   try {
+    const count = (paySelf ? 1 : 0) + subUserIds.length;
+    if (count === 0) {
+      return res.status(400).json({ success: false, message: 'Please select at least one member to pay for.' });
+    }
+
     // 1. Read Base price from configuration settings (default: 1500 INR)
     const settings = await prisma.settings.findUnique({ where: { id: 1 } });
     let baseAmount = 1500.0;
+    let months = 1;
     let totalAmount;
 
     if (plan === 'test_1rupee') {
-      totalAmount = 1.0; // Exactly 1 Rupee total inclusive of GST
+      totalAmount = 1.0 * count; // Exactly 1 Rupee total inclusive of GST per member
     } else {
       if (plan === '3month') {
         baseAmount = 4500.0;
+        months = 3;
       } else if (plan === '6month') {
         baseAmount = 9000.0;
+        months = 6;
+      } else if (plan === '12month') {
+        baseAmount = 18000.0;
+        months = 12;
       }
       
       // Add 18% GST standard
       const gstRate = 0.18;
       const gstAmount = baseAmount * gstRate;
-      totalAmount = baseAmount + gstAmount; // 1770, 5310, or 10620 INR
+      const gatewayCharge = months * 30;
+      totalAmount = (baseAmount + gstAmount + gatewayCharge) * count; // 1800, 5400, 10800, or 21600 INR * count
     }
 
     // Generate unique receipt reference
@@ -70,7 +82,8 @@ export const createOrder = async (req, res, next) => {
         userId,
         amount: totalAmount,
         status: 'PENDING',
-        razorpayOrderId: rpOrder.id
+        razorpayOrderId: rpOrder.id,
+        metadata: JSON.stringify({ paySelf, subUserIds })
       }
     });
 
@@ -137,68 +150,118 @@ export const verifyPayment = async (req, res, next) => {
     // Rule: "Extend subscription by 30 days from current expiry if still active, or from today's date if expired."
     const now = new Date();
     
-    // Check for user's latest active subscription
-    const latestActiveSub = await prisma.subscription.findFirst({
-      where: {
-        userId,
-        status: 'ACTIVE',
-        endDate: { gte: now }
-      },
-      orderBy: { endDate: 'desc' }
-    });
+    let paySelf = true;
+    let subUserIds = [];
+    if (payment.metadata) {
+      try {
+        const parsed = JSON.parse(payment.metadata);
+        paySelf = parsed.paySelf !== undefined ? parsed.paySelf : true;
+        subUserIds = parsed.subUserIds || [];
+      } catch (err) {
+        console.warn('Failed to parse payment metadata:', err.message);
+      }
+    }
+
+    const count = (paySelf ? 1 : 0) + subUserIds.length || 1;
+    const perUserAmount = payment.amount / count;
 
     // Determine duration based on amount paid
     let durationDays = 30;
-    const isTestPlan = Number(payment.amount) === 1.0;
+    const isTestPlan = Number(perUserAmount) === 1.0;
     if (isTestPlan) {
       durationDays = 0;
-    } else if (payment.amount === 5310) {
+    } else if (perUserAmount === 5310 || perUserAmount === 5400) {
       durationDays = 90;
-    } else if (payment.amount === 10620) {
+    } else if (perUserAmount === 10620 || perUserAmount === 10800) {
       durationDays = 180;
+    } else if (perUserAmount === 21240 || perUserAmount === 21600) {
+      durationDays = 365;
     }
 
-    let startDate = new Date();
     let endDate = new Date();
-    let subscription;
+    let subscription = null;
 
-    if (latestActiveSub) {
-      // Extend the existing active subscription's endDate
-      endDate = new Date(latestActiveSub.endDate);
-      if (isTestPlan) {
-        endDate.setMinutes(endDate.getMinutes() + 30);
-      } else {
-        endDate.setDate(endDate.getDate() + durationDays);
-      }
-      
-      subscription = await prisma.subscription.update({
-        where: { id: latestActiveSub.id },
-        data: { 
-          endDate,
-          amount: latestActiveSub.amount + payment.amount
-        }
-      });
-    } else {
-      // Active subscription expired or none exists. Start from today.
-      startDate = new Date();
-      endDate = new Date();
-      if (isTestPlan) {
-        endDate.setMinutes(endDate.getMinutes() + 30);
-      } else {
-        endDate.setDate(endDate.getDate() + durationDays);
-      }
-
-      // Create new Subscription
-      subscription = await prisma.subscription.create({
-        data: {
+    if (paySelf) {
+      // Check for user's latest active subscription
+      const latestActiveSub = await prisma.subscription.findFirst({
+        where: {
           userId,
           status: 'ACTIVE',
-          amount: payment.amount,
-          startDate,
-          endDate,
-          razorpayOrderId: razorpay_order_id
-        }
+          endDate: { gte: now }
+        },
+        orderBy: { endDate: 'desc' }
       });
+
+      if (latestActiveSub) {
+        // Extend the existing active subscription's endDate
+        endDate = new Date(latestActiveSub.endDate);
+        if (isTestPlan) {
+          endDate.setMinutes(endDate.getMinutes() + 30);
+        } else {
+          endDate.setDate(endDate.getDate() + durationDays);
+        }
+        
+        subscription = await prisma.subscription.update({
+          where: { id: latestActiveSub.id },
+          data: { 
+            endDate,
+            amount: latestActiveSub.amount + perUserAmount
+          }
+        });
+      } else {
+        // Active subscription expired or none exists. Start from today.
+        let startDate = new Date();
+        endDate = new Date();
+        if (isTestPlan) {
+          endDate.setMinutes(endDate.getMinutes() + 30);
+        } else {
+          endDate.setDate(endDate.getDate() + durationDays);
+        }
+
+        // Create new Subscription
+        subscription = await prisma.subscription.create({
+          data: {
+            userId,
+            status: 'ACTIVE',
+            amount: perUserAmount,
+            startDate,
+            endDate,
+            razorpayOrderId: razorpay_order_id
+          }
+        });
+      }
+    }
+
+    // Activate/Extend Sub-users
+    for (const subUserId of subUserIds) {
+      const subUser = await prisma.subUser.findUnique({ where: { id: subUserId } });
+      if (subUser) {
+        let subEndDate = new Date();
+        if (subUser.subscriptionStatus === 'ACTIVE' && subUser.subscriptionEndDate && subUser.subscriptionEndDate >= new Date()) {
+          subEndDate = new Date(subUser.subscriptionEndDate);
+          if (isTestPlan) {
+            subEndDate.setMinutes(subEndDate.getMinutes() + 30);
+          } else {
+            subEndDate.setDate(subEndDate.getDate() + durationDays);
+          }
+        } else {
+          if (isTestPlan) {
+            subEndDate.setMinutes(subEndDate.getMinutes() + 30);
+          } else {
+            subEndDate.setDate(subEndDate.getDate() + durationDays);
+          }
+        }
+
+        endDate = subEndDate; // Use sub-user end date as fallback for messages
+
+        await prisma.subUser.update({
+          where: { id: subUserId },
+          data: {
+            subscriptionStatus: 'ACTIVE',
+            subscriptionEndDate: subEndDate
+          }
+        });
+      }
     }
 
     // 5. Update Payment record with success fields
@@ -207,7 +270,7 @@ export const verifyPayment = async (req, res, next) => {
       where: { id: payment.id },
       data: {
         status: 'SUCCESS',
-        subscriptionId: subscription.id,
+        subscriptionId: subscription ? subscription.id : null,
         razorpayPaymentId: razorpay_payment_id,
         razorpaySignature: razorpay_signature,
         invoiceNumber
@@ -311,40 +374,117 @@ export const handleWebhook = async (req, res, next) => {
         const userId = existingPayment.userId;
         const now = new Date();
         
-        let durationDays = 30;
-        const isTestPlan = Number(amount) === 1.0;
-        if (isTestPlan) {
-          durationDays = 0;
-        } else if (amount === 5310) {
-          durationDays = 90;
-        } else if (amount === 10620) {
-          durationDays = 180;
-        }
-        
-        const endDate = new Date();
-        if (isTestPlan) {
-          endDate.setMinutes(endDate.getMinutes() + 30);
-        } else {
-          endDate.setDate(endDate.getDate() + durationDays);
+        let paySelf = true;
+        let subUserIds = [];
+        if (existingPayment.metadata) {
+          try {
+            const parsed = JSON.parse(existingPayment.metadata);
+            paySelf = parsed.paySelf !== undefined ? parsed.paySelf : true;
+            subUserIds = parsed.subUserIds || [];
+          } catch (err) {
+            console.warn('Failed to parse webhook metadata:', err.message);
+          }
         }
 
-        const subscription = await prisma.subscription.create({
-          data: {
-            userId,
-            status: 'ACTIVE',
-            amount,
-            startDate: now,
-            endDate,
-            razorpayOrderId: orderId
+        const count = (paySelf ? 1 : 0) + subUserIds.length || 1;
+        const perUserAmount = amount / count;
+
+        let durationDays = 30;
+        const isTestPlan = Number(perUserAmount) === 1.0;
+        if (isTestPlan) {
+          durationDays = 0;
+        } else if (perUserAmount === 5310 || perUserAmount === 5400) {
+          durationDays = 90;
+        } else if (perUserAmount === 10620 || perUserAmount === 10800) {
+          durationDays = 180;
+        } else if (perUserAmount === 21240 || perUserAmount === 21600) {
+          durationDays = 365;
+        }
+        
+        let endDate = new Date();
+        let subscription = null;
+
+        if (paySelf) {
+          const latestActiveSub = await prisma.subscription.findFirst({
+            where: {
+              userId,
+              status: 'ACTIVE',
+              endDate: { gte: now }
+            },
+            orderBy: { endDate: 'desc' }
+          });
+
+          if (latestActiveSub) {
+            endDate = new Date(latestActiveSub.endDate);
+            if (isTestPlan) {
+              endDate.setMinutes(endDate.getMinutes() + 30);
+            } else {
+              endDate.setDate(endDate.getDate() + durationDays);
+            }
+            subscription = await prisma.subscription.update({
+              where: { id: latestActiveSub.id },
+              data: {
+                endDate,
+                amount: latestActiveSub.amount + perUserAmount
+              }
+            });
+          } else {
+            let startDate = new Date();
+            endDate = new Date();
+            if (isTestPlan) {
+              endDate.setMinutes(endDate.getMinutes() + 30);
+            } else {
+              endDate.setDate(endDate.getDate() + durationDays);
+            }
+            subscription = await prisma.subscription.create({
+              data: {
+                userId,
+                status: 'ACTIVE',
+                amount: perUserAmount,
+                startDate,
+                endDate,
+                razorpayOrderId: orderId
+              }
+            });
           }
-        });
+        }
+
+        // Sub-users activation in Webhook
+        for (const subUserId of subUserIds) {
+          const subUser = await prisma.subUser.findUnique({ where: { id: subUserId } });
+          if (subUser) {
+            let subEndDate = new Date();
+            if (subUser.subscriptionStatus === 'ACTIVE' && subUser.subscriptionEndDate && subUser.subscriptionEndDate >= new Date()) {
+              subEndDate = new Date(subUser.subscriptionEndDate);
+              if (isTestPlan) {
+                subEndDate.setMinutes(subEndDate.getMinutes() + 30);
+              } else {
+                subEndDate.setDate(subEndDate.getDate() + durationDays);
+              }
+            } else {
+              if (isTestPlan) {
+                subEndDate.setMinutes(subEndDate.getMinutes() + 30);
+              } else {
+                subEndDate.setDate(subEndDate.getDate() + durationDays);
+              }
+            }
+            endDate = subEndDate;
+            await prisma.subUser.update({
+              where: { id: subUserId },
+              data: {
+                subscriptionStatus: 'ACTIVE',
+                subscriptionEndDate: subEndDate
+              }
+            });
+          }
+        }
 
         const invoiceNumber = `INV-${now.getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
         await prisma.payment.update({
           where: { id: existingPayment.id },
           data: {
             status: 'SUCCESS',
-            subscriptionId: subscription.id,
+            subscriptionId: subscription ? subscription.id : null,
             razorpayPaymentId: paymentId,
             invoiceNumber
           }
@@ -447,10 +587,12 @@ export const handleWebhook = async (req, res, next) => {
         const isTestPlan = Number(amount) === 1.0;
         if (isTestPlan) {
           durationDays = 0;
-        } else if (amount === 5310) {
+        } else if (amount === 5310 || amount === 5400) {
           durationDays = 90;
-        } else if (amount === 10620) {
+        } else if (amount === 10620 || amount === 10800) {
           durationDays = 180;
+        } else if (amount === 21240 || amount === 21600) {
+          durationDays = 365;
         }
 
         let startDate = new Date();

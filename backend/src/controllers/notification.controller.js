@@ -136,6 +136,15 @@ export const sendYouTubeLive = async (req, res, next) => {
       data: userNotificationData
     });
 
+    // Fetch active paid sub-users who have a phone number
+    const activeSubUsers = await prisma.subUser.findMany({
+      where: {
+        subscriptionStatus: 'ACTIVE',
+        subscriptionEndDate: { gte: now },
+        phone: { not: null }
+      }
+    });
+
     // Dispatch YouTube Live invitations via SMS/OTP service (Scopycode)
     paidUsers.forEach(async (user) => {
       try {
@@ -145,17 +154,25 @@ export const sendYouTubeLive = async (req, res, next) => {
       }
     });
 
+    activeSubUsers.forEach(async (sub) => {
+      try {
+        await sendLiveLinkSMS(sub.phone, sub.name, liveUrl);
+      } catch (err) {
+        console.error(`[Scopycode-LiveStream] Failed sending to sub-user ${sub.phone}:`, err.message);
+      }
+    });
+
     await prisma.activityLog.create({
       data: {
         userId: req.user.id,
-        action: `Broadcasted YouTube Live link to ${paidUsers.length} paid members. URL: ${liveUrl}`,
+        action: `Broadcasted YouTube Live link to ${paidUsers.length} paid members and ${activeSubUsers.length} paid sub-users. URL: ${liveUrl}`,
         ipAddress: req.ip
       }
     });
 
     return res.status(200).json({
       success: true,
-      message: `YouTube Live invitations sent successfully to ${paidUsers.length} subscribers.`
+      message: `YouTube Live invitations sent successfully to ${paidUsers.length} primary subscribers and ${activeSubUsers.length} sub-users.`
     });
   } catch (error) {
     next(error);

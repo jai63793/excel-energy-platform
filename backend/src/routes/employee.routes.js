@@ -13,8 +13,9 @@ import {
 
 const router = express.Router();
 
-// Require authentication for all employee routes
+// Require authentication and employee/volunteer/admin roles for all employee routes
 router.use(authenticateJWT);
+router.use(requireRole(['EMPLOYEE', 'VOLUNTEER', 'ADMIN']));
 
 router.get('/profile', getEmployeeProfile);
 router.put('/duty-status', updateDutyStatus);

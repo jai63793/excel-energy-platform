@@ -10,6 +10,7 @@ import {
   registerWithFirebaseAction
 } from '../store/authSlice';
 import api from '../services/api';
+import { hashPasswordSHA256 } from '../utils/hash';
 import { initRecaptcha, sendOTPWithFirebase } from '../services/firebase';
 
 export default function Login() {
@@ -19,9 +20,11 @@ export default function Login() {
   const { loading } = useSelector((state) => state.auth);
 
   // Auth Modes & Steps
-  const [isSignup, setIsSignup] = useState(false);
+  const [isSignup, setIsSignup] = useState(location.state?.isSignup || false);
   const [loginType, setLoginType] = useState('password'); // 'otp' | 'forgot' | 'firebase'
   const [step, setStep] = useState('phone-input'); // 'phone-input' | 'otp-verify' | 'forgot-phone' | 'forgot-otp' | 'forgot-new-password'
+  const [signUpOtpSent, setSignUpOtpSent] = useState(false);
+  const [signUpOtpCode, setSignUpOtpCode] = useState('');
 
   // Firebase Phone Auth States
   const [firebaseConfirmResult, setFirebaseConfirmResult] = useState(null);
@@ -75,6 +78,13 @@ export default function Login() {
 
     return () => clearInterval(timerRef.current);
   }, [timerActive, timer, loginType]);
+
+  // Sync signup tab state from navigation context
+  useEffect(() => {
+    if (location.state?.isSignup !== undefined) {
+      setIsSignup(location.state.isSignup);
+    }
+  }, [location.state]);
 
   // Handle Photo base64 upload
   const handlePhotoChange = (e) => {
@@ -270,7 +280,7 @@ export default function Login() {
     if (result.success) {
       setIsFirebaseRegisterPending(false);
       toast.success('Account registered successfully!');
-      navigate(from + fromSearch, { replace: true });
+      navigate('/dashboard', { replace: true });
     } else {
       toast.error(result.error || 'Registration failed.');
     }
@@ -301,11 +311,39 @@ export default function Login() {
     }
   };
 
-  // 4. Create Account / Register
+  // 4. Create Account / Register (Submit registration with verified WhatsApp OTP code)
+  const handleSendSignUpOTP = async () => {
+    const rawPhone = phone.replace(/^\+91/, '');
+    if (!rawPhone || rawPhone.length !== 10) {
+      toast.error('Please enter a valid 10-digit WhatsApp number first.');
+      return;
+    }
+
+    const formattedPhone = `+91${rawPhone}`;
+
+    toast.loading('Sending verification OTP to WhatsApp...');
+    try {
+      const res = await api.post('/auth/request-signup-otp', { phone: formattedPhone });
+      toast.dismiss();
+      if (res.data?.success) {
+        setSignUpOtpSent(true);
+        toast.success('Verification OTP sent successfully to your WhatsApp!');
+      }
+    } catch (err) {
+      toast.dismiss();
+      toast.error(err.response?.data?.message || 'Failed to send verification OTP.');
+    }
+  };
+
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     if (!name || !phone || !password) {
       toast.error('Name, WhatsApp number and password are required.');
+      return;
+    }
+
+    if (!signUpOtpSent || signUpOtpCode.length !== 6) {
+      toast.error('Please verify your WhatsApp number first by entering the OTP sent to you.');
       return;
     }
 
@@ -321,13 +359,16 @@ export default function Login() {
       email: email || undefined,
       address: address || undefined,
       password,
-      profilePhoto: profilePhoto || undefined
+      profilePhoto: profilePhoto || undefined,
+      otpCode: signUpOtpCode
     }));
     toast.dismiss();
 
     if (result.success) {
+      setSignUpOtpSent(false);
+      setSignUpOtpCode('');
       toast.success('Account registered successfully!');
-      navigate(from + fromSearch, { replace: true });
+      navigate('/dashboard', { replace: true });
     } else {
       toast.error(result.error || 'Registration failed.');
     }
@@ -391,10 +432,11 @@ export default function Login() {
 
     setLoadingPasswordReset(true);
     try {
+      const hashedPassword = await hashPasswordSHA256(newPassword);
       const res = await api.post('/auth/forgot-password-reset', {
         phone,
         otpCode,
-        newPassword
+        newPassword: hashedPassword
       });
       if (res.data?.success) {
         toast.success('Password changed successfully! You can now log in.');
@@ -437,7 +479,7 @@ export default function Login() {
   };
 
   return (
-    <div style={{
+    <div className={isSignup ? 'signup-active' : ''} style={{
       minHeight: '100vh',
       display: 'flex',
       flexDirection: 'column',
@@ -460,14 +502,48 @@ export default function Login() {
             display: none !important;
           }
           .login-form-panel {
-            padding: 30px 20px 40px 20px !important;
+            padding: 24px 16px !important;
           }
           .login-brand-header {
             margin-bottom: 10px !important;
           }
           .login-brand-header img {
-            width: 120px !important;
-            height: 120px !important;
+            width: 100px !important;
+            height: 100px !important;
+          }
+          .login-brand-header h2 {
+            font-size: 1.5rem !important;
+            margin-top: 5px !important;
+          }
+          
+          /* SignUp One-Shot adjustments */
+          .signup-active .login-brand-header {
+            display: none !important;
+          }
+          .signup-active .login-form-panel {
+            padding: 16px 12px !important;
+          }
+          .signup-active form {
+            gap: 10px !important;
+          }
+          .signup-active input {
+            padding: 10px !important;
+            font-size: 0.88rem !important;
+          }
+          .signup-active #reg-phone {
+            padding-left: 45px !important;
+          }
+          .signup-active label {
+            margin-bottom: 3px !important;
+            font-size: 0.78rem !important;
+          }
+          .signup-active h3 {
+            font-size: 1.5rem !important;
+            margin-bottom: 4px !important;
+          }
+          .signup-active p {
+            font-size: 0.8rem !important;
+            margin-bottom: 14px !important;
           }
         }
       `}</style>
@@ -591,42 +667,6 @@ export default function Login() {
               </p>
 
               <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {/* Photo Upload Option */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '6px' }}>
-                  <div style={{ position: 'relative' }}>
-                    {profilePhoto ? (
-                      <img 
-                        src={profilePhoto} 
-                        alt="Profile Preview" 
-                        style={{ width: '60px', height: '60px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--color-accent)' }} 
-                      />
-                    ) : (
-                      <div style={{
-                        width: '60px',
-                        height: '60px',
-                        borderRadius: '50%',
-                        background: 'rgba(255, 255, 255, 0.1)',
-                        border: '1px dashed rgba(255, 255, 255, 0.3)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '1.2rem',
-                        color: 'rgba(255, 255, 255, 0.7)'
-                      }}>
-                        📷
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-bg-sand)' }}>Profile Picture</label>
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      onChange={handlePhotoChange} 
-                      style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', cursor: 'pointer' }}
-                    />
-                  </div>
-                </div>
 
                 <div style={{ textAlign: 'left' }}>
                   <label htmlFor="reg-name" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>Full Name *</label>
@@ -643,20 +683,57 @@ export default function Login() {
 
                 <div style={{ textAlign: 'left' }}>
                   <label htmlFor="reg-phone" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>WhatsApp Number *</label>
-                  <div style={{ position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.5)', fontSize: '0.92rem', fontWeight: '600' }}>+91</span>
-                    <input
-                      id="reg-phone"
-                      type="tel"
-                      placeholder="10 digit WhatsApp number"
-                      value={phone.replace(/^\+91/, '')}
-                      onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
-                      maxLength={10}
-                      required
-                      style={{ width: '100%', padding: '12px 12px 12px 45px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
-                    />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.5)', fontSize: '0.92rem', fontWeight: '600' }}>+91</span>
+                      <input
+                        id="reg-phone"
+                        type="tel"
+                        placeholder="10 digit WhatsApp number"
+                        value={phone.replace(/^\+91/, '')}
+                        onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                        maxLength={10}
+                        required
+                        style={{ width: '100%', padding: '12px 12px 12px 45px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem' }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSendSignUpOTP}
+                      style={{
+                        padding: '0 16px',
+                        borderRadius: '6px',
+                        background: 'var(--color-accent)',
+                        color: 'var(--color-white)',
+                        border: 'none',
+                        fontWeight: '600',
+                        fontSize: '0.82rem',
+                        cursor: 'pointer',
+                        transition: 'opacity 0.2s'
+                      }}
+                      onMouseOver={(e) => e.currentTarget.style.opacity = '0.9'}
+                      onMouseOut={(e) => e.currentTarget.style.opacity = '1'}
+                    >
+                      {signUpOtpSent ? 'Resend' : 'Send OTP'}
+                    </button>
                   </div>
                 </div>
+
+                {signUpOtpSent && (
+                  <div style={{ textAlign: 'left' }}>
+                    <label htmlFor="reg-otp" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>Enter Verification OTP *</label>
+                    <input
+                      id="reg-otp"
+                      type="text"
+                      placeholder="Enter 6-digit OTP"
+                      value={signUpOtpCode}
+                      onChange={(e) => setSignUpOtpCode(e.target.value.replace(/[^0-9]/g, ''))}
+                      maxLength={6}
+                      required
+                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.15)', background: 'rgba(0, 0, 0, 0.2)', color: '#fff', outline: 'none', fontSize: '0.92rem', letterSpacing: '8px', textAlign: 'center', fontWeight: 'bold' }}
+                    />
+                  </div>
+                )}
 
                 <div style={{ textAlign: 'left' }}>
                   <label htmlFor="reg-email" style={{ display: 'block', fontSize: '0.82rem', fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: '5px' }}>Email Address (Optional)</label>
@@ -721,9 +798,28 @@ export default function Login() {
             <div>
               {loginType !== 'forgot' ? (
                 <>
-                  <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.8rem', fontWeight: '600', marginBottom: '8px', color: 'var(--color-bg-sand)' }}>
+                  <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.8rem', fontWeight: '600', marginBottom: '4px', color: 'var(--color-bg-sand)' }}>
                     Welcome Back
                   </h3>
+                  <div style={{ marginBottom: '16px' }}>
+                    <span style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '0.85rem' }}>New user? </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsSignup(true)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--color-accent)',
+                        fontWeight: '700',
+                        fontSize: '0.85rem',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                        padding: 0
+                      }}
+                    >
+                      New Signup / Create Account
+                    </button>
+                  </div>
                   <p style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '0.9rem', marginBottom: '24px' }}>
                     Sign in to manage your wellness journey
                   </p>
@@ -1115,7 +1211,7 @@ export default function Login() {
                   )}
 
                   <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '0.9rem' }}>
-                    <span style={{ color: 'rgba(255,255,255,0.6)' }}>Don't have an account? </span>
+                    <span style={{ color: 'rgba(255,255,255,0.6)' }}>New User? Pls </span>
                     <button 
                       type="button" 
                       onClick={() => setIsSignup(true)}

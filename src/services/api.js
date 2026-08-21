@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '/api');
+
+let tokenMemory = null;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -10,12 +12,19 @@ const api = axios.create({
   },
 });
 
+api.setTokenMemory = (token) => {
+  tokenMemory = token;
+};
+
+api.getTokenMemory = () => {
+  return tokenMemory;
+};
+
 // Request interceptor to append JWT Access Token
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('accessToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (tokenMemory) {
+      config.headers.Authorization = `Bearer ${tokenMemory}`;
     }
     return config;
   },
@@ -30,13 +39,19 @@ api.interceptors.response.use(
 
     // Avoid infinite loop if refresh token request fails itself
     if (error.response?.status === 401 && originalRequest.url === '/auth/refresh') {
-      localStorage.removeItem('accessToken');
+      tokenMemory = null;
       localStorage.removeItem('user');
       window.location.href = '/#/login';
       return Promise.reject(error);
     }
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const isAuthRoute = originalRequest.url.includes('/login') || 
+                        originalRequest.url.includes('/register') || 
+                        originalRequest.url.includes('/request-') || 
+                        originalRequest.url.includes('/forgot-') ||
+                        originalRequest.url.includes('/auth/google');
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthRoute) {
       originalRequest._retry = true;
 
       try {
@@ -46,14 +61,11 @@ api.interceptors.response.use(
           { withCredentials: true }
         );
 
-        if (response.data?.success && response.data?.accessToken) {
-          const newToken = response.data.accessToken;
-          localStorage.setItem('accessToken', newToken);
-          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        if (response.data?.success) {
           return api(originalRequest);
         }
       } catch (refreshError) {
-        localStorage.removeItem('accessToken');
+        tokenMemory = null;
         localStorage.removeItem('user');
         window.location.href = '/#/login';
         return Promise.reject(refreshError);

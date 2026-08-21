@@ -150,7 +150,7 @@ export default function Knowledge() {
                                         <span className="section-tagline">AS TAUGHT BY GRAND MASTER CHOA KOK SUI</span>
                                         <h2 className="section-title" style={{ textAlign: 'left', margin: '8px 0 20px 0' }}>What Are Chakras?</h2>
                                         <div className="bl" style={{ display: 'flex', flexDirection: 'column', gap: '16px', color: 'var(--color-text-muted)', lineHeight: '1.7' }}>
-                                            <p>Chakras serve as entry points for life energy — Prana — into your body. Grand Master Choa Kok Sui identified <strong>12 Major Chakras</strong> in Pranic Healing and Arhatic Yoga, each corresponding to specific organs and glands of the physical body based on their positions.</p>
+                                            <p>Chakras serve as entry points for life energy — Prana — into your body. Grand Master Choa Kok Sui identified <strong>11 Major Chakras</strong> in Pranic Healing and Arhatic Yoga, each corresponding to specific organs and glands of the physical body based on their positions.</p>
                                             <p>The major chakras not only control and energise the vital organs of the body but also control and affect a person’s psychological and spiritual conditions. Just as the visible physical body has vital and minor organs, the energy body has major, minor, and mini chakras.</p>
                                             <p>When any chakra becomes congested with diseased energy or depleted of prana, the corresponding physical organs and psychological functions begin to suffer. This is why Pranic Healing works at the level of the energy body: addressing root causes rather than surface symptoms.</p>
                                         </div>
@@ -161,7 +161,7 @@ export default function Knowledge() {
                                     </div>
                                 </div>
 
-                                <div style={{ marginTop: '80px', textAlign: 'center' }}>
+                                <div className="knowledge-section-divider" style={{ textAlign: 'center' }}>
                                     <span className="section-tagline">THE 11 MAJOR CHAKRAS</span>
                                     <h2 className="section-title" style={{ margin: '8px 0 12px 0' }}>Chakras Map</h2>
                                     <p style={{ color: 'var(--color-text-muted)', maxWidth: '600px', margin: '0 auto 40px auto' }}>As identified and mapped by Grand Master Choa Kok Sui through decades of systematic research and validation.</p>
@@ -334,10 +334,10 @@ export default function Knowledge() {
                         {/* Arhatic section */}
                         <section className="pa sp" style={{ background: 'var(--color-bg-light)' }}>
                             <div className="courses-container">
+                                <span className="section-tagline">WHAT IS ARHATIC YOGA?</span>
+                                <h2 className="section-title" style={{ textAlign: 'left', margin: '8px 0 32px 0' }}>The Path of the Arhat</h2>
                                 <div className="knowledge-g2-layout-1">
                                     <div>
-                                        <span className="section-tagline">WHAT IS ARHATIC YOGA?</span>
-                                        <h2 className="section-title" style={{ textAlign: 'left', margin: '8px 0 20px 0' }}>The Path of the Arhat</h2>
                                         <div className="bl" style={{ display: 'flex', flexDirection: 'column', gap: '16px', color: 'var(--color-text-muted)', lineHeight: '1.7' }}>
                                             <p>The word <strong>Arhatic</strong> is derived from <em>Arhat</em> — a Sanskrit term for a highly evolved spiritual being who has largely mastered the lower nature and walks steadily in the light of the Higher Soul.</p>
                                             <p>Developed by Grand Master Choa Kok Sui after decades of research, Arhatic Yoga synthesises the essential power and wisdom of seven distinct yogic traditions into one integrated, modern, and accelerated system. It proportionally balances <strong>Divine Love, Divine Intelligence, and Divine Will.</strong></p>
@@ -382,6 +382,9 @@ export default function Knowledge() {
                                             <div className="ahfi" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 'var(--border-radius-sm)', padding: '20px' }}><div className="ahft" style={{ fontFamily: 'var(--font-heading)', fontSize: '0.95rem', fontWeight: '700', color: 'var(--color-accent)', marginBottom: '8px' }}>Character Building</div><p style={{ fontSize: '0.88rem', color: 'rgba(255,255,255,0.7)', lineHeight: '1.6', margin: 0 }}>The Five Virtues practised as the bedrock of spiritual life — transforming character from the inside out.</p></div>
                                             <div className="ahfi" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 'var(--border-radius-sm)', padding: '20px' }}><div className="ahft" style={{ fontFamily: 'var(--font-heading)', fontSize: '0.95rem', fontWeight: '700', color: 'var(--color-accent)', marginBottom: '8px' }}>Soul Realisation</div><p style={{ fontSize: '0.88rem', color: 'rgba(255,255,255,0.7)', lineHeight: '1.6', margin: 0 }}>Direct experience of the Higher Soul — the divine aspect within — and an accelerated path toward oneness.</p></div>
                                             <div className="ahfi" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 'var(--border-radius-sm)', padding: '20px' }}><div className="ahft" style={{ fontFamily: 'var(--font-heading)', fontSize: '0.95rem', fontWeight: '700', color: 'var(--color-accent)', marginBottom: '8px' }}>Greater Capacity to Serve</div><p style={{ fontSize: '0.88rem', color: 'rgba(255,255,255,0.7)', lineHeight: '1.6', margin: 0 }}>Becoming an increasingly effective instrument of healing and service to humanity — the highest purpose of the path.</p></div>
+                                            <div className="ahfi ahfi-more" style={{ background: 'var(--color-accent)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 'var(--border-radius-sm)', padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60px' }}>
+                                                <div style={{ fontFamily: 'var(--font-heading)', fontSize: '0.85rem', fontWeight: '700', color: 'var(--color-white)', margin: 0, textTransform: 'uppercase', letterSpacing: '1px' }}>More...</div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -391,17 +394,17 @@ export default function Knowledge() {
                         <section className="pa sps" style={{ background: 'var(--color-bg-sand)', padding: '80px 0' }}>
                             <div className="courses-container">
                                 <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-                                    <span className="section-tagline">AT EXCEL ENERGY</span>
-                                    <h2 className="section-title" style={{ margin: '8px 0' }}>Arhatic Yoga at Excel Energy</h2>
+                                    <span className="section-tagline"></span>
+                                    <h2 className="section-title" style={{ margin: '8px 0' }}>Arhatic Yoga At Excel Energy</h2>
                                 </div>
                                 <div className="knowledge-g3-layout">
-                                    <div className="cd">
+                                    <div className="cd" style={{ background: 'var(--color-white)', border: '1px solid rgba(8, 50, 38, 0.05)', borderRadius: 'var(--border-radius-md)', padding: '30px', display: 'flex', flexDirection: 'column', height: '100%' }}>
                                         <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.2rem', color: 'var(--color-primary-dark)', marginBottom: '14px' }}>Arhatic Yoga Preparatory Level</h3>
                                         <p style={{ fontSize: '0.93rem', color: 'var(--color-text-muted)', lineHeight: '1.6', marginBottom: '20px', flex: 1 }}>The foundational entry point into the Arhatic Yoga system. Covers the Five Pillars, purification practices, Meditation on Twin Hearts, Arhatic Energy Circulation (microcosmic orbit meditation), and character building as the foundation of all spiritual development.</p>
-                                        <p style={{ fontSize: '0.82rem', fontStyle: 'italic', fontWeight: 'bold', color: 'var(--color-accent)', margin: 0 }}>Prerequisite: Basic Pranic Healing (Level 3)</p>
+                                        <p style={{ fontSize: '0.82rem', fontStyle: 'italic', fontWeight: 'bold', color: 'var(--color-accent)', margin: 0 }}>Prerequisite: Pranic Psychotherapy & Achieving Oneness with the Higher Soul</p>
                                     </div>
-                                    <div className="cd">
-                                        <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.2rem', color: 'var(--color-primary-dark)', marginBottom: '14px' }}>Regular Practice Sessions</h3>
+                                    <div className="cd" style={{ background: 'var(--color-white)', border: '1px solid rgba(8, 50, 38, 0.05)', borderRadius: 'var(--border-radius-md)', padding: '30px', display: 'flex', flexDirection: 'column', height: '100%' }}>
+                                        <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.2rem', color: 'var(--color-primary-dark)', marginBottom: '14px' }}>Arhatic Yoga Regular Practice Sessions</h3>
                                         <p style={{ fontSize: '0.93rem', color: 'var(--color-text-muted)', lineHeight: '1.6', marginBottom: '20px', flex: 1 }}>Structured, regular group practice sittings for initiated Arhatic Yoga practitioners at Preparatory and higher levels. A supported, energetically held environment for deepening practice under the lineage of GMCKS.</p>
                                         <p style={{ fontSize: '0.82rem', fontStyle: 'italic', fontWeight: 'bold', color: 'var(--color-accent)', margin: 0 }}>For initiated practitioners only</p>
                                     </div>
@@ -412,7 +415,14 @@ export default function Knowledge() {
                                     </div>
                                 </div>
                                 <div style={{ textAlign: 'center', marginTop: '40px' }}>
-                                    <Link to="/contact" className="btn-primary" style={{ display: 'inline-flex', padding: '14px 32px' }}>Enquire About Arhatic Yoga</Link>
+                                    <Link 
+                                        to="/contact?course=Find%20a%20Course" 
+                                        state={{ selectedCourse: 'Find a Course' }} 
+                                        className="btn-primary" 
+                                        style={{ display: 'inline-flex', padding: '14px 32px' }}
+                                    >
+                                        Enquire About Arhatic Yoga
+                                    </Link>
                                 </div>
                             </div>
                         </section>
@@ -465,14 +475,6 @@ export default function Knowledge() {
                                     <div>
                                         <img src={knowledgeImages.practice_img_0} alt="Meditation on Twin Hearts — activating heart and crown chakras for world peace" style={{ width: '100%', borderRadius: 'var(--border-radius-md)', boxShadow: '0 4px 20px rgba(8, 50, 38, 0.06)', maxHeight: '420px', objectFit: 'cover' }} />
                                         <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', fontStyle: 'italic', marginTop: '8px', textAlign: 'center' }}>The Meditation on Twin Hearts — a meditation for personal illumination and world peace</p>
-                                        
-                                        {/* CSS animation for concentric glowing rings */}
-                                        <div className="mv" style={{ position: 'relative', height: '260px', display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center', marginTop: '32px' }}>
-                                            <div className="mr" style={{ position: 'absolute', borderRadius: '50%', border: '1px solid rgba(8, 50, 38, 0.1)', width: '220px', height: '220px', animation: 'ringsPulse 4s ease-in-out infinite' }}></div>
-                                            <div className="mr" style={{ position: 'absolute', borderRadius: '50%', border: '1px solid rgba(224, 112, 43, 0.15)', width: '160px', height: '160px', animation: 'ringsPulse 4s ease-in-out infinite', animationDelay: '1.2s' }}></div>
-                                            <div className="mr" style={{ position: 'absolute', borderRadius: '50%', border: '1px solid rgba(8, 50, 38, 0.25)', width: '100px', height: '100px', animation: 'ringsPulse 4s ease-in-out infinite', animationDelay: '2.4s' }}></div>
-                                            <div className="mc" style={{ width: '50px', height: '50px', background: 'radial-gradient(circle, var(--color-accent), var(--color-primary-medium))', borderRadius: '50%', position: 'absolute', animation: 'centerGlow 4s ease-in-out infinite' }}></div>
-                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -484,13 +486,13 @@ export default function Knowledge() {
                                     <div>
                                         <span className="section-tagline">SCIENTIFIC ENERGY ASSESSMENT</span>
                                         <h2 className="section-title" style={{ textAlign: 'left', margin: '8px 0 20px 0' }}>Bio-Well GDV Scanning</h2>
-                                        <p style={{ color: 'var(--color-text-muted)', fontSize: '0.98rem', lineHeight: '1.7', marginBottom: '16px' }}>Developed by Professor Konstantin Korotkov of St. Petersburg State Technical University, the Bio-Well GDV device makes your energy field visible — generating a comprehensive 24-page report in under 60 seconds.</p>
+                                        <p style={{ color: 'var(--color-text-muted)', fontSize: '0.98rem', lineHeight: '1.7', marginBottom: '16px' }}>Developed by Professor Konstantin Korotkov of St. Petersburg State Technical University, the Bio-Well GDV device makes your energy field visible — generating a comprehensive  report.</p>
                                         <p style={{ color: 'var(--color-text-muted)', fontSize: '0.95rem', lineHeight: '1.7', fontStyle: 'italic', marginBottom: '24px' }}>“What we have discovered with Bio-Well is that consciousness itself leaves a measurable imprint on the physical world. Every thought, every emotion, every intention creates ripples in your biofield that we can now see and understand.” — Dr. Konstantin Korotkov</p>
                                         {/* Bio-Well statistics cards deleted */}
                                         <Link to="/contact" className="btn-primary" style={{ display: 'inline-flex', padding: '14px 32px', marginTop: '30px' }}>Book a Bio-Well Scan</Link>
                                     </div>
                                     <div>
-                                        <div style={{ fontFamily: 'var(--font-heading)', fontSize: '0.95rem', fontWeight: '700', color: 'var(--color-primary-medium)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '20px' }}>What Your 24-Page Report Shows</div>
+                                        <div style={{ fontFamily: 'var(--font-heading)', fontSize: '0.95rem', fontWeight: '700', color: 'var(--color-primary-medium)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '20px' }}>What Your Comprehensive Report Shows</div>
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                                             <div className="ri" style={{ display: 'flex', gap: '14px', background: 'var(--color-white)', padding: '16px', borderRadius: 'var(--border-radius-sm)', border: '1px solid rgba(8, 50, 38, 0.04)', boxShadow: 'var(--shadow-sm)' }}><span style={{ fontSize: '1.3rem' }}>🌐</span><div><div style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)', fontSize: '0.92rem', marginBottom: '2px' }}>Biofield Image</div><div style={{ fontSize: '0.88rem', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>Your complete energy field — size, brightness, and coherence visualised as a full aura diagram.</div></div></div>
                                             <div className="ri" style={{ display: 'flex', gap: '14px', background: 'var(--color-white)', padding: '16px', borderRadius: 'var(--border-radius-sm)', border: '1px solid rgba(8, 50, 38, 0.04)', boxShadow: 'var(--shadow-sm)' }}><span style={{ fontSize: '1.3rem' }}>🗺️</span><div><div style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)', fontSize: '0.92rem', marginBottom: '2px' }}>Organ Energy Map</div><div style={{ fontSize: '0.88rem', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>Energy levels of major organ systems — colour-coded for immediate assessment.</div></div></div>
@@ -498,7 +500,12 @@ export default function Knowledge() {
                                             <div className="ri" style={{ display: 'flex', gap: '14px', background: 'var(--color-white)', padding: '16px', borderRadius: 'var(--border-radius-sm)', border: '1px solid rgba(8, 50, 38, 0.04)', boxShadow: 'var(--shadow-sm)' }}><span style={{ fontSize: '1.3rem' }}>📊</span><div><div style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)', fontSize: '0.92rem', marginBottom: '2px' }}>Stress Index</div><div style={{ fontSize: '0.88rem', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>Your psycho-physiological stress level, scientifically correlated with Heart Rate Variability.</div></div></div>
                                             <div className="ri" style={{ display: 'flex', gap: '14px', background: 'var(--color-white)', padding: '16px', borderRadius: 'var(--border-radius-sm)', border: '1px solid rgba(8, 50, 38, 0.04)', boxShadow: 'var(--shadow-sm)' }}><span style={{ fontSize: '1.3rem' }}>🔋</span><div><div style={{ fontWeight: 'bold', color: 'var(--color-primary-dark)', fontSize: '0.92rem', marginBottom: '2px' }}>Energy Reserve</div><div style={{ fontSize: '0.88rem', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>Your body’s total energetic capacity — your vitality “battery level” at the time of the scan.</div></div></div>
                                         </div>
+                                        <br />
+                                        <br />
+                                        <div>
+                                          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.95rem', lineHeight: '1.7', fontStyle: 'italic', marginBottom: '24px' }}>“What we have discovered with Bio-Well is that consciousness itself leaves a measurable imprint on the physical world. Every thought, every emotion, every intention creates ripples in your biofield that we can now see and understand.” — Dr. Konstantin Korotkov</p>
                                         {/* Sources footnote deleted */}
+                                        </div>
                                     </div>
                                 </div>
                             </div>

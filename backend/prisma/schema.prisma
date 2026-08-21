@@ -21,6 +21,7 @@ model User {
   email        String?  
   address      String?  @db.Text
   profilePhoto String?  @db.LongText // Base64 profile photo field
+  nakshatram   String?
   passwordHash String?  // Optional hash, if admin allows password login or sets temp pass
   status       String   @default("ACTIVE") // ACTIVE, INACTIVE
   roleId       Int
@@ -37,6 +38,7 @@ model User {
   attendances       Attendance[]
   userBookings      Booking[]          @relation("UserBookings")
   healerBookings    Booking[]          @relation("HealerBookings")
+  subUsers          SubUser[]
 }
 
 model EmployeeProfile {
@@ -134,6 +136,7 @@ model Payment {
   razorpaySignature String?
   invoiceNumber     String?       @unique
   refundReason      String?       @db.Text
+  metadata          String?       @db.Text
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 }
@@ -208,4 +211,18 @@ model ActivityLog {
   action    String   @db.Text
   ipAddress String?
   createdAt DateTime @default(now())
+}
+
+model SubUser {
+  id                  Int       @id @default(autoincrement())
+  parentId            Int
+  parent              User      @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  name                String
+  phone               String?   // Optional mobile number
+  nakshatram          String
+  photo               String?   @db.LongText // Base64 profile photo field
+  subscriptionStatus  String    @default("INACTIVE") // ACTIVE, INACTIVE, EXPIRED
+  subscriptionEndDate DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 }

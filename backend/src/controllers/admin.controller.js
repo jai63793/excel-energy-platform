@@ -1,9 +1,29 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+
+const decodePassword = (val) => {
+  if (val && typeof val === 'string' && val.startsWith('base64:')) {
+    return Buffer.from(val.substring(7), 'base64').toString('utf-8');
+  }
+  return val;
+};
 import prisma from '../config/db.js';
 import { sendSMS } from '../services/sms.service.js';
 import { sendPasswordResetEmail } from '../services/email.service.js';
 import { createRazorpayPaymentLink } from '../services/razorpay.service.js';
 import { sendWhatsAppMessage } from '../services/whatsapp.service.js';
+
+const sanitizeUser = (user) => {
+  if (!user) return user;
+  const sanitized = { ...user };
+  delete sanitized.passwordHash;
+  return sanitized;
+};
+
+const sanitizeUsers = (users) => {
+  if (!Array.isArray(users)) return users;
+  return users.map(u => sanitizeUser(u));
+};
 
 /**
  * Fetch Admin Dashboard overall analytics and statistics
@@ -148,7 +168,8 @@ export const getUsers = async (req, res, next) => {
           subscriptions: {
             orderBy: { endDate: 'desc' },
             take: 1
-          }
+          },
+          subUsers: true
         },
         orderBy: { createdAt: 'desc' },
         skip: parseInt(skip),
@@ -159,7 +180,7 @@ export const getUsers = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      users,
+      users: sanitizeUsers(users),
       pagination: {
         total,
         pages: Math.ceil(total / limit),
@@ -293,7 +314,7 @@ export const getUserDetails = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    return res.status(200).json({ success: true, user });
+    return res.status(200).json({ success: true, user: sanitizeUser(user) });
   } catch (error) {
     next(error);
   }
@@ -477,7 +498,7 @@ export const getEmployeesAndVolunteers = async (req, res, next) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    return res.status(200).json({ success: true, staff });
+    return res.status(200).json({ success: true, staff: sanitizeUsers(staff) });
   } catch (error) {
     next(error);
   }
@@ -514,7 +535,7 @@ export const createStaffMember = async (req, res, next) => {
     let passwordHash = null;
     if (password) {
       const salt = await bcrypt.genSalt(10);
-      passwordHash = await bcrypt.hash(password, salt);
+      passwordHash = await bcrypt.hash(decodePassword(password), salt);
     }
 
     const newStaff = await prisma.user.create({
@@ -539,7 +560,7 @@ export const createStaffMember = async (req, res, next) => {
     return res.status(201).json({
       success: true,
       message: `${targetRole} created successfully.`,
-      staff: newStaff
+      staff: sanitizeUser(newStaff)
     });
   } catch (error) {
     next(error);
@@ -586,7 +607,7 @@ export const updateStaffMember = async (req, res, next) => {
 
     if (password) {
       const salt = await bcrypt.genSalt(10);
-      updateData.passwordHash = await bcrypt.hash(password, salt);
+      updateData.passwordHash = await bcrypt.hash(decodePassword(password), salt);
     }
 
     const updatedStaff = await prisma.user.update({
@@ -612,7 +633,7 @@ export const updateStaffMember = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: 'Staff member updated successfully.',
-      staff: updatedStaff
+      staff: sanitizeUser(updatedStaff)
     });
   } catch (error) {
     next(error);
@@ -1072,7 +1093,12 @@ export const createAdminUser = async (req, res, next) => {
     const username = await generateUniqueUsername(name);
     
     // Hash password or create a default temp one
-    const userPassword = password || Math.random().toString(36).substring(2, 10);
+    let userPassword = password;
+    if (!password) {
+      userPassword = Math.random().toString(36).substring(2, 10);
+    } else {
+      userPassword = decodePassword(password);
+    }
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(userPassword, salt);
 
@@ -1172,6 +1198,125 @@ export const createAdminUser = async (req, res, next) => {
 };
 
 /**
+ * Bulk Create Customer Users directly
+ */
+export const createBulkAdminUsers = async (req, res, next) => {
+  const { users } = req.body;
+
+  if (!users || !Array.isArray(users) || users.length === 0) {
+    return res.status(400).json({ success: false, message: 'An array of users is required.' });
+  }
+
+  const successList = [];
+  const failedList = [];
+
+  try {
+    for (let i = 0; i < users.length; i++) {
+      const u = users[i];
+      const { name, phone, email, password } = u;
+
+      if (!name || !phone) {
+        failedList.push({
+          name: name || '',
+          phone: phone || '',
+          error: 'Name and Phone/WhatsApp number are required.'
+        });
+        continue;
+      }
+
+      // Check if duplicate in successList
+      const isDuplicateInBatch = successList.some(item => item.phone === phone);
+      if (isDuplicateInBatch) {
+        failedList.push({
+          name,
+          phone,
+          error: 'Duplicate phone number in the upload batch.'
+        });
+        continue;
+      }
+
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { phone: phone },
+            { phone: phone.startsWith('+91') ? phone.replace('+91', '') : `+91${phone}` }
+          ]
+        }
+      });
+
+      if (existingUser) {
+        failedList.push({
+          name,
+          phone,
+          error: 'Mobile number already registered.'
+        });
+        continue;
+      }
+
+      try {
+        const username = await generateUniqueUsername(name);
+        
+        // Hash password or create a default temp one
+        let userPassword = password;
+        if (!password) {
+          userPassword = Math.random().toString(36).substring(2, 10);
+        } else {
+          userPassword = decodePassword(password);
+        }
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(userPassword, salt);
+
+        const newUser = await prisma.user.create({
+          data: {
+            username,
+            name,
+            phone,
+            email: email || null,
+            passwordHash,
+            roleId: 2, // USER
+            status: 'ACTIVE'
+          }
+        });
+
+        successList.push({
+          id: newUser.id,
+          username: newUser.username,
+          name: newUser.name,
+          phone: newUser.phone,
+          email: newUser.email,
+          temporaryPassword: password ? undefined : userPassword
+        });
+
+        // Write activity log for this creation
+        await prisma.activityLog.create({
+          data: {
+            userId: req.user.id,
+            action: `Admin directly created user account (Bulk): ${username}`,
+            ipAddress: req.ip
+          }
+        });
+      } catch (err) {
+        failedList.push({
+          name,
+          phone,
+          error: err.message || 'Database creation failure.'
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      registeredCount: successList.length,
+      failedCount: failedList.length,
+      successUsers: successList,
+      failedUsers: failedList
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Admin Update Customer User details & password
  */
 export const updateAdminUser = async (req, res, next) => {
@@ -1207,7 +1352,7 @@ export const updateAdminUser = async (req, res, next) => {
 
     if (password) {
       const salt = await bcrypt.genSalt(10);
-      updateData.passwordHash = await bcrypt.hash(password, salt);
+      updateData.passwordHash = await bcrypt.hash(decodePassword(password), salt);
     }
 
     const updatedUser = await prisma.user.update({
@@ -1350,57 +1495,106 @@ export const verifyPaymentLinkStatusManual = async (req, res, next) => {
       orderBy: { endDate: 'desc' }
     });
 
+    let paySelf = true;
+    let subUserIds = [];
+    if (paymentRecord.metadata) {
+      try {
+        const parsed = JSON.parse(paymentRecord.metadata);
+        paySelf = parsed.paySelf !== undefined ? parsed.paySelf : true;
+        subUserIds = parsed.subUserIds || [];
+      } catch (err) {
+        console.warn('Failed to parse manual payment metadata:', err.message);
+      }
+    }
+
+    const count = (paySelf ? 1 : 0) + subUserIds.length || 1;
+    const perUserAmount = amount / count;
+
     // Determine duration based on amount paid
     let durationDays = 30;
-    const isTestPlan = Number(amount) === 1.0;
+    const isTestPlan = Number(perUserAmount) === 1.0;
     if (isTestPlan) {
       durationDays = 0;
-    } else if (amount === 5310) {
+    } else if (perUserAmount === 5310 || perUserAmount === 5400) {
       durationDays = 90;
-    } else if (amount === 10620) {
+    } else if (perUserAmount === 10620 || perUserAmount === 10800) {
       durationDays = 180;
+    } else if (perUserAmount === 21240 || perUserAmount === 21600) {
+      durationDays = 365;
     }
 
     let startDate = new Date();
     let endDate = new Date();
-    let subscription;
+    let subscription = null;
 
-    if (latestActiveSub) {
-      // Extend subscription
-      endDate = new Date(latestActiveSub.endDate);
-      if (isTestPlan) {
-        endDate.setMinutes(endDate.getMinutes() + 30);
-      } else {
-        endDate.setDate(endDate.getDate() + durationDays);
-      }
-
-      subscription = await prisma.subscription.update({
-        where: { id: latestActiveSub.id },
-        data: { 
-          endDate,
-          amount: latestActiveSub.amount + amount
+    if (paySelf) {
+      if (latestActiveSub) {
+        // Extend subscription
+        endDate = new Date(latestActiveSub.endDate);
+        if (isTestPlan) {
+          endDate.setMinutes(endDate.getMinutes() + 30);
+        } else {
+          endDate.setDate(endDate.getDate() + durationDays);
         }
-      });
-    } else {
-      // Start new subscription
-      startDate = new Date();
-      endDate = new Date();
-      if (isTestPlan) {
-        endDate.setMinutes(endDate.getMinutes() + 30);
-      } else {
-        endDate.setDate(endDate.getDate() + durationDays);
-      }
 
-      subscription = await prisma.subscription.create({
-        data: {
-          userId,
-          status: 'ACTIVE',
-          amount,
-          startDate,
-          endDate,
-          razorpayOrderId: paymentLinkId
+        subscription = await prisma.subscription.update({
+          where: { id: latestActiveSub.id },
+          data: { 
+            endDate,
+            amount: latestActiveSub.amount + perUserAmount
+          }
+        });
+      } else {
+        // Start new subscription
+        startDate = new Date();
+        endDate = new Date();
+        if (isTestPlan) {
+          endDate.setMinutes(endDate.getMinutes() + 30);
+        } else {
+          endDate.setDate(endDate.getDate() + durationDays);
         }
-      });
+
+        subscription = await prisma.subscription.create({
+          data: {
+            userId,
+            status: 'ACTIVE',
+            amount: perUserAmount,
+            startDate,
+            endDate,
+            razorpayOrderId: paymentLinkId
+          }
+        });
+      }
+    }
+
+    // Activate/Extend Sub-users
+    for (const subUserId of subUserIds) {
+      const subUser = await prisma.subUser.findUnique({ where: { id: subUserId } });
+      if (subUser) {
+        let subEndDate = new Date();
+        if (subUser.subscriptionStatus === 'ACTIVE' && subUser.subscriptionEndDate && subUser.subscriptionEndDate >= new Date()) {
+          subEndDate = new Date(subUser.subscriptionEndDate);
+          if (isTestPlan) {
+            subEndDate.setMinutes(subEndDate.getMinutes() + 30);
+          } else {
+            subEndDate.setDate(subEndDate.getDate() + durationDays);
+          }
+        } else {
+          if (isTestPlan) {
+            subEndDate.setMinutes(subEndDate.getMinutes() + 30);
+          } else {
+            subEndDate.setDate(subEndDate.getDate() + durationDays);
+          }
+        }
+
+        await prisma.subUser.update({
+          where: { id: subUserId },
+          data: {
+            subscriptionStatus: 'ACTIVE',
+            subscriptionEndDate: subEndDate
+          }
+        });
+      }
     }
 
     const invoiceNumber = `INV-${now.getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -1411,7 +1605,7 @@ export const verifyPaymentLinkStatusManual = async (req, res, next) => {
       data: {
         userId,
         status: 'SUCCESS',
-        subscriptionId: subscription.id,
+        subscriptionId: subscription ? subscription.id : null,
         invoiceNumber
       }
     });

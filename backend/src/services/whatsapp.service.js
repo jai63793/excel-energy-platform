@@ -207,6 +207,13 @@ export const sendWhatsAppYouTubeLive = async (phone, userName, liveUrl) => {
  * Send Custom Admin Announcement
  */
 export const sendWhatsAppAdminAnnouncement = async (phone, userName, title, description) => {
+  const suffix = '\n\nTo view and manage your notifications, log in to your dashboard at: https://excelenergy.com';
+  const truncatedTitle = title && title.length > 100 ? title.substring(0, 97) + '...' : title;
+  const truncatedDesc = description && description.length > (1000 - suffix.length)
+    ? description.substring(0, (1000 - suffix.length) - 3) + '...'
+    : description;
+  const finalDesc = `${truncatedDesc}${suffix}`;
+
   const template = {
     name: 'admin_announcement',
     language: { code: 'en' },
@@ -215,14 +222,14 @@ export const sendWhatsAppAdminAnnouncement = async (phone, userName, title, desc
         type: 'body',
         parameters: [
           { type: 'text', text: userName },
-          { type: 'text', text: title },
-          { type: 'text', text: description }
+          { type: 'text', text: truncatedTitle },
+          { type: 'text', text: finalDesc }
         ]
       }
     ]
   };
 
-  const textFallback = `Hello ${userName},\n\n*Announcement: ${title}*\n\n${description}\n\nExcel Energy`;
+  const textFallback = `Hello ${userName},\n\nWe would like to share an important announcement from the Excel Energy Divine Wellness Portal.\n\nAnnouncement: ${truncatedTitle}\n\n${finalDesc}\n\nThank you for being a valued member of our community.\n\nWarm regards,\nExcel Energy`;
 
   return sendWhatsAppMessage(phone, provider === 'meta' ? template : textFallback);
 };

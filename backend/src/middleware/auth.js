@@ -5,13 +5,19 @@ import { verifyAccessToken } from '../utils/jwt.js';
  * Authenticates requests checking for valid Bearer token
  */
 export const authenticateJWT = async (req, res, next) => {
+  let token = null;
   const authHeader = req.headers.authorization;
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.cookies && req.cookies.accessToken) {
+    token = req.cookies.accessToken;
+  }
+
+  if (!token) {
     return res.status(401).json({ success: false, message: 'Access denied. No token provided.' });
   }
 
-  const token = authHeader.split(' ')[1];
   const decoded = verifyAccessToken(token);
 
   if (!decoded) {
@@ -32,6 +38,9 @@ export const authenticateJWT = async (req, res, next) => {
     if (user.status === 'SUSPENDED' || user.status === 'INACTIVE') {
       return res.status(403).json({ success: false, message: 'Your account is inactive. Contact administrator.' });
     }
+
+    // Sanitize user context by stripping passwordHash
+    delete user.passwordHash;
 
     // Attach user information to request
     req.user = user;

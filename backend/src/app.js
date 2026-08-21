@@ -15,6 +15,7 @@ import notificationRoutes from './routes/notification.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
 import employeeRoutes from './routes/employee.routes.js';
 import bookingRoutes from './routes/booking.routes.js';
+import subuserRoutes from './routes/subuser.routes.js';
 
 const app = express();
 
@@ -90,6 +91,7 @@ app.use('/api/contacts', contactRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/employee', employeeRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/sub-users', subuserRoutes);
 
 // Test API Status Route
 app.get('/api/health', (req, res) => {

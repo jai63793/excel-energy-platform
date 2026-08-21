@@ -104,14 +104,53 @@ const BENEFITS = [
                 <path d="M12 3a9 9 0 0 0 0 18" fill="rgba(224, 112, 43, 0.15)" />
             </svg>
         )
+    },
+    {
+        title: 'Rice Distribution Support',
+        desc: 'A part of your membership contribution supports rice distribution for the needy, spreading nourishment and care to underprivileged families.',
+        icon: (
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 12a10 10 0 0 0 20 0H2z" />
+                <path d="M12 2v6M9 4l1 3M15 4l-1 3" />
+            </svg>
+        )
+    },
+    {
+        title: 'Tirupati Balaji Prayers',
+        desc: 'A part of your contribution is offered to Tirupati Balaji with prayers for prosperity, abundance, good fortune, and blessings for our members.',
+        icon: (
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2a4 4 0 0 1 4 4c0 3-4 8-4 8s-4-5-4-4a4 4 0 0 1 4-4z" />
+                <path d="M12 14s4-2 6-1 2 5-1 6-5-5-5-5z" />
+                <path d="M12 14s-4-2-6-1-2 5 1 6 5-5 5-5z" />
+            </svg>
+        )
+    },
+    {
+        title: 'GMCKS Ashram Support',
+        desc: 'A part of your contribution is offered to support the GMCKS Ashram and its spiritual initiatives, preserving spiritual teachings and healing work.',
+        icon: (
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
+            </svg>
+        )
     }
 ];
 
 const PLANS = [
-    { id: '1month', name: '1 Month Plan', price: 1500, label: '1 Month Membership Fee', tag: 'Monthly Renewal' },
-    { id: '3month', name: '3 Month Plan', price: 4500, label: '3 Months Membership Fee', tag: 'Quarterly Renewal', badge: 'Most Popular' },
-    { id: '6month', name: '6 Month Plan', price: 9000, label: '6 Months Membership Fee', tag: 'Half-Yearly Renewal', badge: 'Best Value' }
+    { id: '1month', name: '1 Month Plan', price: 1500, label: '1 Month Membership Fee', tag: 'Monthly Renewal', months: 1 },
+    { id: '3month', name: '3 Month Plan', price: 4500, label: '3 Months Membership Fee', tag: 'Quarterly Renewal', months: 3 },
+    { id: '6month', name: '6 Month Plan', price: 9000, label: '6 Months Membership Fee', tag: 'Half-Yearly Renewal', badge: 'Most Popular', months: 6 },
+    { id: '12month', name: 'AnnualPlan', price: 18000, label: '12 Months Membership Fee', tag: 'Yearly Renewal', badge: 'Best Value', months: 12 }
 ];
+
+const PLAN_BENEFITS = {
+    '1month': '12 distance healing per month',
+    '3month': '36 distance healing + more',
+    '6month': '72 distance healing + more',
+    '12month': '144 distance healing + more'
+};
 
 export default function JoinMember() {
     const navigate = useNavigate();
@@ -123,8 +162,21 @@ export default function JoinMember() {
     const [paymentSuccess, setPaymentSuccess] = useState(false);
     const [invoiceNum, setInvoiceNum] = useState('');
     const [expiryVal, setExpiryVal] = useState('');
+    const [agreedToPolicy, setAgreedToPolicy] = useState(false);
+    const [viewingBenefitsPlanId, setViewingBenefitsPlanId] = useState(null);
 
     const containerRef = useRef(null);
+
+    const [showInteractiveBenefits, setShowInteractiveBenefits] = useState(false);
+    const [currentBenefitIndex, setCurrentBenefitIndex] = useState(0);
+
+    const handleNextBenefit = () => {
+        setCurrentBenefitIndex(prev => (prev + 1) % BENEFITS.length);
+    };
+
+    const handlePrevBenefit = () => {
+        setCurrentBenefitIndex(prev => (prev - 1 + BENEFITS.length) % BENEFITS.length);
+    };
 
     // Read selected plan from query parameters on load
     useEffect(() => {
@@ -166,7 +218,8 @@ export default function JoinMember() {
     }, []);
 
     const gstAmount = Math.round(selectedPlan.price * 0.18);
-    const totalAmount = selectedPlan.price + gstAmount;
+    const gatewayCharge = selectedPlan.months * 30;
+    const totalAmount = selectedPlan.price + gstAmount + gatewayCharge;
 
     // Load Razorpay Checkout dynamically
     const loadRazorpayScript = () => {
@@ -180,10 +233,16 @@ export default function JoinMember() {
     };
 
     const handlePayNow = async () => {
+        if (!agreedToPolicy) {
+            toast.error('Please agree to the Privacy Policy to proceed.');
+            return;
+        }
+
         if (!isAuthenticated) {
             toast('Please sign in or register to purchase your Divine Wellness Membership.', { icon: '🔑' });
             navigate('/login', { 
                 state: { 
+                    isSignup: true,
                     from: { 
                         pathname: '/join-member', 
                         search: `?plan=${selectedPlan.id}` 
@@ -267,16 +326,22 @@ export default function JoinMember() {
 
     return (
         <div className="join-member-page-wrapper" ref={containerRef}>
+            <style>{`
+                @keyframes slideDown {
+                    from { opacity: 0; transform: translateY(-4px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+            `}</style>
             {/* Hero Sub-Banner Section */}
             <section className="join-member-hero page-hero-banner">
                 <div className="join-member-hero-content">
                     <span className="section-tagline">WELLNESS & SERVICE</span>
-                    <h1>Excel Energy Divine Wellness Membership</h1>
+                    <h1>Excel Energy <br />Divine Wellness <br /> Membership</h1>
                     <p style={{ fontStyle: 'italic', color: 'var(--color-accent)', fontSize: '1.25rem', marginBottom: '12px', fontWeight: '600' }}>
                         Healing • Meditation • Spiritual Growth • Seva
                     </p>
                     <p style={{ maxWidth: '750px', margin: '0 auto 20px auto', lineHeight: '1.6' }}>
-                        A comprehensive monthly programme designed to support your physical, emotional and spiritual well-being through healing, meditation, spiritual guidance and charitable service.
+                        {/* A comprehensive monthly programme designed to support your physical, emotional and spiritual well-being through healing, meditation, spiritual guidance and charitable service. */}
                     </p>
                     <div className="breadcrumbs">
                         <Link to="/">Home</Link>
@@ -289,17 +354,119 @@ export default function JoinMember() {
             {/* Main Content Sections */}
             <section className="join-member-main-section">
                 <div className="join-member-container">
+                    
+                    {/* Membership Details Card at the Top */}
+                    <div className="membership-price-card" style={{ marginBottom: '35px', position: 'relative' }}>
+                        <span className="price-badge">DIVINE WELLNESS PROGRAMME</span>
+                        <div className="price-label">Monthly Membership Fee</div>
+                        <div className="price-value">₹1,500 <span className="price-taxes">+ applicable taxes</span></div>
+                        <p className="price-subtext" style={{ margin: '0 0 20px 0' }}>A complete wellness program supporting your body, mind, and spirit.</p>
+                        
+                        {/* Interactive Membership Benefits Selector */}
+                        <div className="interactive-benefits-trigger" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: '16px' }}>
+                            <button
+                                type="button"
+                                onClick={() => setShowInteractiveBenefits(prev => !prev)}
+                                style={{
+                                    background: 'none',
+                                    color: '#fff',
+                                    border: 'none',
+                                    padding: 0,
+                                    fontSize: '0.9rem',
+                                    fontWeight: 'bold',
+                                    cursor: 'pointer',
+                                    textDecoration: 'underline',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    transition: 'color 0.2s'
+                                }}
+                            >
+                                🎁 {showInteractiveBenefits ? 'Hide Membership Benefits' : 'Click to View Membership Benefits One-by-One'}
+                            </button>
+
+                            {showInteractiveBenefits && (
+                                <div style={{
+                                    marginTop: '20px',
+                                    background: 'rgba(255,255,255,0.06)',
+                                    borderRadius: '12px',
+                                    padding: '20px',
+                                    border: '1.5px solid rgba(255,255,255,0.1)',
+                                    textAlign: 'left',
+                                    position: 'relative'
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                                        <div style={{
+                                            background: '#fff',
+                                            color: 'var(--color-primary-medium)',
+                                            width: '34px',
+                                            height: '34px',
+                                            borderRadius: '50%',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            flexShrink: 0
+                                        }}>
+                                            {BENEFITS[currentBenefitIndex].icon}
+                                        </div>
+                                        <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 'bold', color: '#fff' }}>
+                                            {BENEFITS[currentBenefitIndex].title}
+                                        </h4>
+                                    </div>
+                                    <p style={{ margin: '0 0 18px 0', fontSize: '0.88rem', color: '#eee', lineHeight: '1.5' }}>
+                                        {BENEFITS[currentBenefitIndex].desc}
+                                    </p>
+
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                                        <span style={{ fontSize: '0.78rem', color: '#ddd', fontWeight: '600' }}>
+                                            Benefit {currentBenefitIndex + 1} of {BENEFITS.length}
+                                        </span>
+                                        <div style={{ display: 'flex', gap: '8px' }}>
+                                            <button
+                                                type="button"
+                                                onClick={handlePrevBenefit}
+                                                style={{
+                                                    background: '#fff',
+                                                    color: 'var(--color-primary-medium)',
+                                                    border: 'none',
+                                                    borderRadius: '4px',
+                                                    padding: '6px 14px',
+                                                    fontSize: '0.78rem',
+                                                    fontWeight: 'bold',
+                                                    cursor: 'pointer',
+                                                    transition: 'opacity 0.2s'
+                                                }}
+                                            >
+                                                ◀ Prev
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={handleNextBenefit}
+                                                style={{
+                                                    background: '#fff',
+                                                    color: 'var(--color-primary-medium)',
+                                                    border: 'none',
+                                                    borderRadius: '4px',
+                                                    padding: '6px 14px',
+                                                    fontSize: '0.78rem',
+                                                    fontWeight: 'bold',
+                                                    cursor: 'pointer',
+                                                    transition: 'opacity 0.2s'
+                                                }}
+                                            >
+                                                Next ▶
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
                     <div className="join-member-grid">
                         
                         {/* Left Column: Benefits & Details */}
                         <div className="benefits-column">
-                            {/* Membership Details */}
-                            <div className="membership-price-card">
-                                <span className="price-badge">DIVINE WELLNESS PROGRAMME</span>
-                                <div className="price-label">Monthly Membership Fee</div>
-                                <div className="price-value">₹1,500 <span className="price-taxes">+ applicable taxes</span></div>
-                                <p className="price-subtext">A complete wellness program supporting your body, mind, and spirit.</p>
-                            </div>
 
                             <h2 className="join-column-title" style={{ marginTop: '40px' }}>Membership Benefits</h2>
                             <div className="benefits-list">
@@ -351,11 +518,12 @@ export default function JoinMember() {
                                             </p>
                                             
                                             {/* Plan Options Selector */}
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                            <div className="join-plans-selector" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                                                 {PLANS.map((plan) => {
                                                     const isSelected = selectedPlan.id === plan.id;
                                                     return (
                                                         <div 
+                                                            className="join-plan-option-card"
                                                             key={plan.id}
                                                             onClick={() => setSelectedPlan(plan)}
                                                             style={{
@@ -390,15 +558,54 @@ export default function JoinMember() {
                                                             )}
                                                             
                                                             <div>
-                                                                <h4 style={{ margin: '0 0 4px 0', color: 'var(--color-primary-dark)', fontSize: '1.05rem', fontWeight: '600' }}>
+                                                                <h4 className="join-plan-title" style={{ margin: '0 0 4px 0', color: 'var(--color-primary-dark)', fontSize: '1.05rem', fontWeight: '600' }}>
                                                                     {plan.name}
                                                                 </h4>
-                                                                <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', fontWeight: '500' }}>
+                                                                <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', fontWeight: '500', display: 'block' }}>
                                                                     {plan.tag}
                                                                 </span>
+                                                                
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setViewingBenefitsPlanId(viewingBenefitsPlanId === plan.id ? null : plan.id);
+                                                                    }}
+                                                                    style={{
+                                                                        background: 'none',
+                                                                        border: 'none',
+                                                                        padding: '4px 0',
+                                                                        marginTop: '6px',
+                                                                        color: 'var(--color-accent)',
+                                                                        fontSize: '0.78rem',
+                                                                        fontWeight: '600',
+                                                                        textDecoration: 'underline',
+                                                                        cursor: 'pointer',
+                                                                        display: 'block',
+                                                                        textAlign: 'left'
+                                                                    }}
+                                                                >
+                                                                    member benefits click here
+                                                                </button>
+                                                                
+                                                                {viewingBenefitsPlanId === plan.id && (
+                                                                    <div style={{
+                                                                        marginTop: '8px',
+                                                                        padding: '8px 12px',
+                                                                        background: 'rgba(224, 112, 43, 0.08)',
+                                                                        borderRadius: '4px',
+                                                                        fontSize: '0.8rem',
+                                                                        color: 'var(--color-primary-dark)',
+                                                                        fontWeight: '600',
+                                                                        borderLeft: '3px solid var(--color-accent)',
+                                                                        animation: 'slideDown 0.2s ease-out'
+                                                                    }}>
+                                                                        ✨ {PLAN_BENEFITS[plan.id]}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                             <div style={{ textAlign: 'right' }}>
-                                                                <div style={{ fontSize: '1.25rem', fontWeight: '750', color: isSelected ? 'var(--color-accent)' : 'var(--color-primary-dark)' }}>
+                                                                <div className="join-plan-price-val" style={{ fontSize: '1.25rem', fontWeight: '750', color: isSelected ? 'var(--color-accent)' : 'var(--color-primary-dark)' }}>
                                                                     ₹{plan.price.toLocaleString('en-IN')}
                                                                 </div>
                                                                 <span style={{ fontSize: '0.72rem', color: '#888' }}>+ 18% GST</span>
@@ -410,7 +617,7 @@ export default function JoinMember() {
                                         </div>
 
                                         {/* Price Breakdown */}
-                                        <div style={{
+                                        <div className="join-price-breakdown" style={{
                                             background: '#fcfaf7',
                                             border: '1px solid rgba(224, 112, 43, 0.1)',
                                             borderRadius: '8px',
@@ -425,15 +632,33 @@ export default function JoinMember() {
                                                 <span>Base Amount:</span>
                                                 <span>₹{selectedPlan.price.toLocaleString('en-IN')}</span>
                                             </div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', color: 'var(--color-text-muted)' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', color: 'var(--color-text-muted)' }}>
                                                 <span>CGST & SGST (18%):</span>
                                                 <span>₹{gstAmount.toLocaleString('en-IN')}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', color: 'var(--color-text-muted)' }}>
+                                                <span>Gateway Processing Fee:</span>
+                                                <span>₹{gatewayCharge}</span>
                                             </div>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '750', fontSize: '1.05rem', color: 'var(--color-primary-dark)', borderTop: '1px solid rgba(8,50,38,0.08)', paddingTop: '10px' }}>
                                                 <span>Total Payable:</span>
                                                 <span>₹{totalAmount.toLocaleString('en-IN')}</span>
                                             </div>
                                         </div>
+
+                                        {/* Privacy Policy Agreement */}
+                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', marginTop: '16px' }}>
+                                             <input
+                                                 type="checkbox"
+                                                 id="join-privacy-policy-agree"
+                                                 checked={agreedToPolicy}
+                                                 onChange={(e) => setAgreedToPolicy(e.target.checked)}
+                                                 style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                                             />
+                                             <label htmlFor="join-privacy-policy-agree" style={{ fontSize: '0.85rem', color: '#555', cursor: 'pointer', userSelect: 'none' }}>
+                                                 I agree to the <a href="/#/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-primary-medium)', fontWeight: 'bold', textDecoration: 'underline' }}>Privacy Policy</a> *
+                                             </label>
+                                         </div>
 
                                         {/* Payment Button */}
                                         <button 

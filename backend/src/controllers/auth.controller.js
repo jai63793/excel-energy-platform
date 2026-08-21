@@ -7,6 +7,13 @@ import { generateOTP } from '../utils/otp.js';
 import { admin, firebaseInitialized } from '../config/firebase.js';
 import { sendWhatsAppOTP, sendWhatsAppMessage } from '../services/whatsapp.service.js';
 
+const decodePassword = (val) => {
+  if (val && typeof val === 'string' && val.startsWith('base64:')) {
+    return Buffer.from(val.substring(7), 'base64').toString('utf-8');
+  }
+  return val;
+};
+
 // Helper for cross-domain sameSite cookie settings in production
 const getCookieOptions = () => {
   const isProduction = process.env.NODE_ENV === 'production';
@@ -16,6 +23,40 @@ const getCookieOptions = () => {
     sameSite: isProduction ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   };
+};
+
+const getAccessTokenCookieOptions = () => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    maxAge: 15 * 60 * 1000 // 15 minutes
+  };
+};
+
+const sendTokensWithResponse = (res, statusCode, message, user) => {
+  const accessToken = generateAccessToken(user);
+  const refreshToken = generateRefreshToken(user);
+
+  res.cookie('accessToken', accessToken, getAccessTokenCookieOptions());
+  res.cookie('refreshToken', refreshToken, getCookieOptions());
+
+  return res.status(statusCode).json({
+    success: true,
+    message,
+    user: {
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      phone: user.phone,
+      email: user.email,
+      address: user.address || null,
+      profilePhoto: user.profilePhoto || null,
+      role: user.role?.name || (user.roleId === 1 ? 'ADMIN' : (user.roleId === 3 ? 'EMPLOYEE' : (user.roleId === 4 ? 'VOLUNTEER' : 'USER'))),
+      status: user.status
+    }
+  });
 };
 
 /**
@@ -84,13 +125,74 @@ export const requestOTP = async (req, res, next) => {
       }
     });
 
-    // Dispatch OTP via configured SMS/OTP provider
-    await sendOTP(phone, code);
+    // Dispatch OTP asynchronously in background to avoid blocking response
+    sendOTP(phone, code).catch((err) => {
+      console.error('[Background-Login-OTP-Send-Error]', err);
+    });
 
     // Return success.
     const responsePayload = {
       success: true,
       message: 'OTP sent successfully to your mobile number.'
+    };
+
+    return res.status(200).json(responsePayload);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Request OTP for registration (checks that user does NOT exist)
+ */
+export const requestSignupOTP = async (req, res, next) => {
+  const { phone } = req.body;
+
+  try {
+    // Check if user exists in database (supporting prefix variance)
+    const userExists = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: phone },
+          { phone: phone.startsWith('+91') ? phone.replace('+91', '') : `+91${phone}` }
+        ]
+      }
+    });
+
+    if (userExists) {
+      return res.status(400).json({
+        success: false,
+        message: 'This mobile number is already registered. Please login instead.'
+      });
+    }
+
+    const code = generateOTP();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes validity
+
+    // Invalidate previous OTPs for this phone
+    await prisma.oTP.updateMany({
+      where: { phone, isUsed: false },
+      data: { isUsed: true }
+    });
+
+    // Save OTP to DB
+    await prisma.oTP.create({
+      data: {
+        phone,
+        code,
+        expiresAt
+      }
+    });
+
+    // Dispatch OTP asynchronously in background to avoid blocking response
+    sendOTP(phone, code).catch((err) => {
+      console.error('[Background-Signup-OTP-Send-Error]', err);
+    });
+
+    // Return success.
+    const responsePayload = {
+      success: true,
+      message: 'Verification OTP sent successfully to your WhatsApp number.'
     };
 
     return res.status(200).json(responsePayload);
@@ -171,28 +273,7 @@ export const registerUser = async (req, res, next) => {
       }
     });
 
-    // Generate tokens
-    const accessToken = generateAccessToken(newUser);
-    const refreshToken = generateRefreshToken(newUser);
-
-    res.cookie('refreshToken', refreshToken, getCookieOptions());
-
-    return res.status(201).json({
-      success: true,
-      message: 'Registration successful.',
-      accessToken,
-      user: {
-        id: newUser.id,
-        username: newUser.username,
-        name: newUser.name,
-        phone: newUser.phone,
-        email: newUser.email,
-        address: newUser.address,
-        profilePhoto: newUser.profilePhoto,
-        role: newUser.role.name,
-        status: newUser.status
-      }
-    });
+    return sendTokensWithResponse(res, 201, 'Registration successful.', newUser);
   } catch (error) {
     next(error);
   }
@@ -256,27 +337,7 @@ export const loginWithOTP = async (req, res, next) => {
       }
     });
 
-    // 4. Generate Tokens
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-
-    res.cookie('refreshToken', refreshToken, getCookieOptions());
-
-    return res.status(200).json({
-      success: true,
-      message: 'Login successful.',
-      accessToken,
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        phone: user.phone,
-        email: user.email,
-        address: user.address,
-        role: user.role.name,
-        status: user.status
-      }
-    });
+    return sendTokensWithResponse(res, 200, 'Login successful.', user);
   } catch (error) {
     next(error);
   }
@@ -308,7 +369,7 @@ export const adminLogin = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Account is inactive. Please contact admin.' });
     }
 
-    const isPasswordMatch = await bcrypt.compare(password, user.passwordHash || '');
+    const isPasswordMatch = await bcrypt.compare(decodePassword(password), user.passwordHash || '');
     if (!isPasswordMatch) {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
@@ -371,7 +432,8 @@ export const refreshUserToken = async (req, res, next) => {
     }
 
     const accessToken = generateAccessToken(user);
-    return res.status(200).json({ success: true, accessToken });
+    res.cookie('accessToken', accessToken, getAccessTokenCookieOptions());
+    return res.status(200).json({ success: true });
   } catch (error) {
     next(error);
   }
@@ -389,14 +451,14 @@ export const changePassword = async (req, res, next) => {
     
     // Check if password exists (could be null if OTP-only signups)
     if (user.passwordHash) {
-      const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+      const isMatch = await bcrypt.compare(decodePassword(currentPassword), user.passwordHash);
       if (!isMatch) {
         return res.status(400).json({ success: false, message: 'Current password incorrect.' });
       }
     }
 
     const salt = await bcrypt.genSalt(10);
-    const newPasswordHash = await bcrypt.hash(newPassword, salt);
+    const newPasswordHash = await bcrypt.hash(decodePassword(newPassword), salt);
 
     await prisma.user.update({
       where: { id: userId },
@@ -421,7 +483,7 @@ export const changePassword = async (req, res, next) => {
  * Update User profile info
  */
 export const updateProfile = async (req, res, next) => {
-  const { name, email, address, profilePhoto } = req.body;
+  const { name, email, address, profilePhoto, nakshatram } = req.body;
   const userId = req.user.id;
 
   try {
@@ -431,7 +493,8 @@ export const updateProfile = async (req, res, next) => {
         name, 
         email, 
         address,
-        profilePhoto: profilePhoto !== undefined ? profilePhoto : undefined
+        profilePhoto: profilePhoto !== undefined ? profilePhoto : undefined,
+        nakshatram: nakshatram !== undefined ? nakshatram : undefined
       },
       include: { role: true }
     });
@@ -447,6 +510,7 @@ export const updateProfile = async (req, res, next) => {
         email: updatedUser.email,
         address: updatedUser.address,
         profilePhoto: updatedUser.profilePhoto,
+        nakshatram: updatedUser.nakshatram,
         role: updatedUser.role.name,
         status: updatedUser.status
       }
@@ -480,6 +544,7 @@ export const logoutUser = async (req, res, next) => {
 
     const clearOptions = getCookieOptions();
     delete clearOptions.maxAge;
+    res.clearCookie('accessToken', clearOptions);
     res.clearCookie('refreshToken', clearOptions);
     return res.status(200).json({ success: true, message: 'Logged out successfully.' });
   } catch (error) {
@@ -491,11 +556,32 @@ export const logoutUser = async (req, res, next) => {
  * Register a new user with password
  */
 export const registerWithPassword = async (req, res, next) => {
-  const { name, phone, email, address, password, profilePhoto } = req.body;
+  const { name, phone, email, address, password, profilePhoto, otpCode } = req.body;
 
   try {
-    if (!name || !phone || !password) {
-      return res.status(400).json({ success: false, message: 'Name, phone, and password are required.' });
+    if (!name || !phone || !password || !otpCode) {
+      return res.status(400).json({ success: false, message: 'Name, phone, password, and OTP code are required.' });
+    }
+
+    // Verify OTP
+    let isOtpValid = await verifyOTPViaProvider(phone, otpCode);
+    
+    if (isOtpValid === null) {
+      const dbOtp = await prisma.oTP.findFirst({
+        where: { phone, isUsed: false },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (!dbOtp || dbOtp.code !== otpCode || dbOtp.expiresAt < new Date()) {
+        return res.status(400).json({ success: false, message: 'Invalid or expired OTP code.' });
+      }
+
+      await prisma.oTP.update({
+        where: { id: dbOtp.id },
+        data: { isUsed: true }
+      });
+    } else if (!isOtpValid) {
+      return res.status(400).json({ success: false, message: 'Invalid OTP code.' });
     }
 
     // Check if user already exists
@@ -514,7 +600,7 @@ export const registerWithPassword = async (req, res, next) => {
 
     const username = await generateUniqueUsername(name);
     const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(password, salt);
+    const passwordHash = await bcrypt.hash(decodePassword(password), salt);
 
     // Create user
     const newUser = await prisma.user.create({
@@ -541,28 +627,7 @@ export const registerWithPassword = async (req, res, next) => {
       }
     });
 
-    // Generate tokens
-    const accessToken = generateAccessToken(newUser);
-    const refreshToken = generateRefreshToken(newUser);
-
-    res.cookie('refreshToken', refreshToken, getCookieOptions());
-
-    return res.status(201).json({
-      success: true,
-      message: 'Registration successful.',
-      accessToken,
-      user: {
-        id: newUser.id,
-        username: newUser.username,
-        name: newUser.name,
-        phone: newUser.phone,
-        email: newUser.email,
-        address: newUser.address,
-        profilePhoto: newUser.profilePhoto,
-        role: newUser.role.name,
-        status: newUser.status
-      }
-    });
+    return sendTokensWithResponse(res, 201, 'Registration successful.', newUser);
   } catch (error) {
     next(error);
   }
@@ -600,7 +665,7 @@ export const loginWithPassword = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'This account does not have a password set. Please log in with OTP or reset password.' });
     }
 
-    const isPasswordMatch = await bcrypt.compare(password, user.passwordHash);
+    const isPasswordMatch = await bcrypt.compare(decodePassword(password), user.passwordHash);
     if (!isPasswordMatch) {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
@@ -613,27 +678,7 @@ export const loginWithPassword = async (req, res, next) => {
       }
     });
 
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-
-    res.cookie('refreshToken', refreshToken, getCookieOptions());
-
-    return res.status(200).json({
-      success: true,
-      message: 'Login successful.',
-      accessToken,
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        phone: user.phone,
-        email: user.email,
-        address: user.address,
-        profilePhoto: user.profilePhoto,
-        role: user.role.name,
-        status: user.status
-      }
-    });
+    return sendTokensWithResponse(res, 200, 'Login successful.', user);
   } catch (error) {
     next(error);
   }
@@ -673,26 +718,7 @@ export const googleAuth = async (req, res, next) => {
       }
     });
 
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-
-    res.cookie('refreshToken', refreshToken, getCookieOptions());
-
-    return res.status(200).json({
-      success: true,
-      message: 'Login successful.',
-      accessToken,
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        phone: user.phone,
-        email: user.email,
-        address: user.address,
-        role: user.role.name,
-        status: user.status
-      }
-    });
+    return sendTokensWithResponse(res, 200, 'Login successful.', user);
   } catch (error) {
     next(error);
   }
@@ -759,26 +785,7 @@ export const loginWithFirebase = async (req, res, next) => {
       }
     });
 
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-
-    res.cookie('refreshToken', refreshToken, getCookieOptions());
-
-    return res.status(200).json({
-      success: true,
-      message: 'Login successful.',
-      accessToken,
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        phone: user.phone,
-        email: user.email,
-        address: user.address,
-        role: user.role.name,
-        status: user.status
-      }
-    });
+    return sendTokensWithResponse(res, 200, 'Login successful.', user);
   } catch (error) {
     console.error('[Firebase-Login-Error]', error.message);
     return res.status(401).json({ success: false, message: 'Firebase authentication failed.' });
@@ -838,28 +845,7 @@ export const registerWithFirebase = async (req, res, next) => {
       }
     });
 
-    // Generate tokens
-    const accessToken = generateAccessToken(newUser);
-    const refreshToken = generateRefreshToken(newUser);
-
-    res.cookie('refreshToken', refreshToken, getCookieOptions());
-
-    return res.status(201).json({
-      success: true,
-      message: 'Registration successful.',
-      accessToken,
-      user: {
-        id: newUser.id,
-        username: newUser.username,
-        name: newUser.name,
-        phone: newUser.phone,
-        email: newUser.email,
-        address: newUser.address,
-        profilePhoto: newUser.profilePhoto,
-        role: newUser.role.name,
-        status: newUser.status
-      }
-    });
+    return sendTokensWithResponse(res, 201, 'Registration successful.', newUser);
   } catch (error) {
     console.error('[Firebase-Register-Error]', error.message);
     return res.status(401).json({ success: false, message: 'Firebase registration failed.' });
@@ -902,8 +888,10 @@ export const forgotPasswordRequest = async (req, res, next) => {
       }
     });
 
-    // Dispatch OTP via configured SMS/OTP provider
-    await sendOTP(phone, code);
+    // Dispatch OTP asynchronously in background to avoid blocking response
+    sendOTP(phone, code).catch((err) => {
+      console.error('[Background-ForgotPassword-OTP-Send-Error]', err);
+    });
 
     // Return success payload.
     const responsePayload = {
@@ -954,7 +942,7 @@ export const forgotPasswordReset = async (req, res, next) => {
     }
 
     const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(newPassword, salt);
+    const passwordHash = await bcrypt.hash(decodePassword(newPassword), salt);
 
     await prisma.user.update({
       where: { id: user.id },

@@ -1,13 +1,13 @@
 import { createSlice } from '@reduxjs/toolkit';
 import api from '../services/api';
+import { hashPasswordSHA256 } from '../utils/hash';
 
 const initialUser = JSON.parse(localStorage.getItem('user')) || null;
-const initialToken = localStorage.getItem('accessToken') || null;
 
 const initialState = {
   user: initialUser,
-  token: initialToken,
-  isAuthenticated: !!initialToken,
+  token: null,
+  isAuthenticated: false,
   loading: false,
   error: null
 };
@@ -28,7 +28,7 @@ const authSlice = createSlice({
       state.token = accessToken;
       state.error = null;
       localStorage.setItem('user', JSON.stringify(user));
-      localStorage.setItem('accessToken', accessToken);
+      api.setTokenMemory(accessToken);
     },
     authFailure: (state, action) => {
       state.loading = false;
@@ -41,7 +41,7 @@ const authSlice = createSlice({
       state.loading = false;
       state.error = null;
       localStorage.removeItem('user');
-      localStorage.removeItem('accessToken');
+      api.setTokenMemory(null);
     },
     updateProfileSuccess: (state, action) => {
       state.user = { ...state.user, ...action.payload };
@@ -92,7 +92,8 @@ export const registerWithOTPAction = (registerData) => async (dispatch) => {
 export const adminLoginAction = (username, password) => async (dispatch) => {
   dispatch(authStart());
   try {
-    const response = await api.post('/auth/admin-login', { username, password });
+    const hashedPassword = await hashPasswordSHA256(password);
+    const response = await api.post('/auth/admin-login', { username, password: hashedPassword });
     if (response.data?.success) {
       dispatch(authSuccess({
         user: response.data.user,
@@ -131,7 +132,8 @@ export const fetchMyProfileAction = () => async (dispatch) => {
 export const loginWithPasswordAction = (identifier, password) => async (dispatch) => {
   dispatch(authStart());
   try {
-    const response = await api.post('/auth/login-password', { identifier, password });
+    const hashedPassword = await hashPasswordSHA256(password);
+    const response = await api.post('/auth/login-password', { identifier, password: hashedPassword });
     if (response.data?.success) {
       dispatch(authSuccess({
         user: response.data.user,
@@ -149,7 +151,8 @@ export const loginWithPasswordAction = (identifier, password) => async (dispatch
 export const registerWithPasswordAction = (registerData) => async (dispatch) => {
   dispatch(authStart());
   try {
-    const response = await api.post('/auth/register-password', registerData);
+    const hashedPassword = await hashPasswordSHA256(registerData.password);
+    const response = await api.post('/auth/register-password', { ...registerData, password: hashedPassword });
     if (response.data?.success) {
       dispatch(authSuccess({
         user: response.data.user,

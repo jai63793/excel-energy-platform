@@ -102,6 +102,10 @@
     text-transform: uppercase;
 }
 
+.mobile-logo-only {
+    display: none !important;
+}
+
 .about-story-content p {
     color: var(--color-text-muted);
     line-height: 1.75;
@@ -617,6 +621,7 @@
 
     .about-virtues-section {
         padding: 40px 20px 60px 20px;
+        overflow: visible !important;
     }
 
     .virtue-card {
@@ -624,7 +629,17 @@
         text-align: center;
         gap: 8px;
         padding: 24px 24px 40px 24px;
+        background-image: none !important;
+        position: sticky !important;
+        background-color: var(--color-white) !important;
+        box-shadow: 0 -8px 30px rgba(8, 50, 38, 0.12) !important;
     }
+
+    .virtue-card:nth-child(1) { z-index: 1; top: 96px !important; }
+    .virtue-card:nth-child(2) { z-index: 2; top: 126px !important; }
+    .virtue-card:nth-child(3) { z-index: 3; top: 156px !important; }
+    .virtue-card:nth-child(4) { z-index: 4; top: 186px !important; }
+    .virtue-card:nth-child(5) { z-index: 5; top: 216px !important; }
 
     .virtue-card:hover {
         transform: translateY(-4px); /* Vertical rise on mobile instead of horizontal shift */
@@ -632,6 +647,56 @@
 
     .virtue-index {
         font-size: 2.5rem;
+    }
+
+    /* Move Grand Master meditation image to top and collapse spacing on mobile view */
+    .about-story-section {
+        grid-template-columns: 1fr !important;
+        gap: 24px !important;
+        padding: 30px 16px !important;
+    }
+
+    .about-story-visual {
+        order: -1 !important;
+        height: auto !important;
+        margin-bottom: 0 !important;
+    }
+
+    .about-story-visual > div:first-child {
+        height: 280px !important;
+    }
+
+    .about-story-img-container {
+        width: 200px !important;
+        height: 200px !important;
+    }
+
+    .about-visual-circle {
+        width: 240px !important;
+        height: 240px !important;
+    }
+
+    .about-visual-leaf-1 svg {
+        width: 60px !important;
+        height: 60px !important;
+    }
+
+    .about-visual-leaf-2 svg {
+        width: 70px !important;
+        height: 70px !important;
+    }
+
+    .desktop-logo-only {
+        display: none !important;
+    }
+
+    .mobile-logo-only {
+        display: flex !important;
+    }
+
+    /* Hide the last two gallery images in the Life At Excel Energy gallery in mobile view */
+    .life-at-excel-gallery .shared-gallery-card:nth-last-child(-n+2) {
+        display: none !important;
     }
 }
 

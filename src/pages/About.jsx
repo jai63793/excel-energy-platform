@@ -205,21 +205,44 @@ export default function About() {
                 }
             );
 
-            // Virtues list scroll animations
-            gsap.fromTo('.virtue-card',
-                { x: -50, opacity: 0 },
-                {
-                    x: 0,
-                    opacity: 1,
-                    duration: 0.8,
-                    stagger: 0.12,
-                    ease: 'power3.out',
-                    scrollTrigger: {
-                        trigger: '.about-virtues-section',
-                        start: 'top 75%'
+            // Virtues list scroll animations (stagger reveal on desktop, scrub reveal/stacking on mobile)
+            if (window.innerWidth <= 768) {
+                const virtueCards = gsap.utils.toArray('.virtue-card');
+                virtueCards.forEach((card, idx) => {
+                    if (idx === 0) return; // Show first card initially, then stack subsequent cards on scroll
+                    gsap.fromTo(card, {
+                        y: 100,
+                        opacity: 0,
+                        scale: 0.92
+                    }, {
+                        scrollTrigger: {
+                            trigger: card,
+                            start: 'top 92%',
+                            end: 'top 60%',
+                            scrub: 1
+                        },
+                        y: 0,
+                        opacity: 1,
+                        scale: 1,
+                        ease: 'power2.out'
+                    });
+                });
+            } else {
+                gsap.fromTo('.virtue-card',
+                    { x: -50, opacity: 0 },
+                    {
+                        x: 0,
+                        opacity: 1,
+                        duration: 0.8,
+                        stagger: 0.12,
+                        ease: 'power3.out',
+                        scrollTrigger: {
+                            trigger: '.about-virtues-section',
+                            start: 'top 75%'
+                        }
                     }
-                }
-            );
+                );
+            }
 
             // Parallax scroll background triggers
             gsap.utils.toArray('.parallax-bg').forEach((bg) => {
@@ -309,14 +332,23 @@ export default function About() {
                             />
                         </div>
                     </div>
-                    {/* Brand Logo directly under the image container */}
-                    <div className="about-story-logo-under" style={{ zIndex: 3, display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
+                    {/* Brand Logo directly under the image container (Desktop only) */}
+                    <div className="about-story-logo-under desktop-logo-only" style={{ zIndex: 3, display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
                         <img 
                             src={new URL('../assets/images/logo.png', import.meta.url).href} 
                             alt="Excel Energy Brand Logo" 
                             style={{ width: '190px', height: 'auto', display: 'block', filter: 'drop-shadow(0 2px 6px rgba(8,50,38,0.06))' }}
                         />
                     </div>
+                </div>
+
+                {/* Brand Logo at the bottom of the section (Mobile only) */}
+                <div className="about-story-logo-under mobile-logo-only" style={{ zIndex: 3, display: 'flex', justifyContent: 'center', width: '100%', marginTop: '24px' }}>
+                    <img 
+                        src={new URL('../assets/images/logo.png', import.meta.url).href} 
+                        alt="Excel Energy Brand Logo" 
+                        style={{ width: '140px', height: 'auto', display: 'block', filter: 'drop-shadow(0 2px 6px rgba(8,50,38,0.06))' }}
+                    />
                 </div>
             </section>
 
@@ -453,12 +485,14 @@ export default function About() {
                 </div>
             </section>
 
-            <SharedGallery
-                tagline="LIFE AT EXCEL ENERGY"
-                title="Glimpses of Our Sanctuary"
-                images={ABOUT_GALLERY_IMAGES}
-                isSandBg={true}
-            />
+            <div className="life-at-excel-gallery">
+                <SharedGallery
+                    tagline="LIFE AT EXCEL ENERGY"
+                    title="Glimpses of Our Sanctuary"
+                    images={ABOUT_GALLERY_IMAGES}
+                    isSandBg={true}
+                />
+            </div>
         </div>
     );
 }

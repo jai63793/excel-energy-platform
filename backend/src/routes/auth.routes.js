@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { 
   requestOTP, 
+  requestSignupOTP,
   registerUser, 
   loginWithOTP, 
   adminLogin, 
@@ -38,6 +39,7 @@ const router = Router();
 
 // Public OTP flow
 router.post('/request-otp', otpRateLimiter, validateOTPRequest, requestOTP);
+router.post('/request-signup-otp', otpRateLimiter, validateOTPRequest, requestSignupOTP);
 router.post('/register', validateRegister, registerUser);
 router.post('/login-otp', loginRateLimiter, validateOTPVerify, loginWithOTP);
 
