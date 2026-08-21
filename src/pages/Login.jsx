@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { 
-  loginWithOTPAction, 
+import {
+  loginWithOTPAction,
   registerWithPasswordAction,
   loginWithPasswordAction,
   loginWithFirebaseAction,
@@ -170,7 +170,7 @@ export default function Login() {
 
     try {
       toast.loading('Initializing verification...');
-      
+
       // Initialize recaptcha if it hasn't been initialized
       if (!recaptchaVerifierRef.current) {
         recaptchaVerifierRef.current = initRecaptcha('firebase-recaptcha-container');
@@ -188,7 +188,7 @@ export default function Login() {
       setStep('otp-verify');
       setTimer(300); // 5 minutes
       setTimerActive(true);
-      
+
       if (confirmationResult.isMock) {
         toast.success(`Mock OTP initialized. Code is ${confirmationResult.otp} (or 123456)`);
       } else {
@@ -201,7 +201,7 @@ export default function Login() {
       if (recaptchaVerifierRef.current && recaptchaVerifierRef.current.clear) {
         try {
           recaptchaVerifierRef.current.clear();
-        } catch (_) {}
+        } catch (_) { }
         recaptchaVerifierRef.current = null;
       }
     }
@@ -440,7 +440,7 @@ export default function Login() {
       });
       if (res.data?.success) {
         toast.success('Password changed successfully! You can now log in.');
-        
+
         // Return to standard login
         setLoginType('password');
         setStep('phone-input');
@@ -459,7 +459,7 @@ export default function Login() {
   const handleGoogleSelect = async (name, email) => {
     setShowGoogleModal(false);
     toast.loading('Authenticating Google account...');
-    
+
     const result = await dispatch(loginWithGoogleAction({ name, email }));
     toast.dismiss();
 
@@ -573,9 +573,9 @@ export default function Login() {
 
       {/* TOP SECTION: BRAND LOGO */}
       <div className="login-brand-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '20px', zIndex: 1 }}>
-        <img 
-          src={new URL('../assets/images/logo.png', import.meta.url).href} 
-          alt="Brand Logo" 
+        <img
+          src={new URL('../assets/images/logo.png', import.meta.url).href}
+          alt="Brand Logo"
           style={{ width: '180px', height: '180px', objectFit: 'contain', display: 'block', margin: '0 auto' }}
         />
         <h2 style={{ fontFamily: 'var(--font-heading)', color: '#fff', marginTop: '10px', fontSize: '1.9rem', fontWeight: '500', letterSpacing: '0.5px' }}>
@@ -600,7 +600,7 @@ export default function Login() {
         zIndex: 1,
         color: '#fff'
       }}>
-        
+
         {/* COLUMN 1: FORM INTERFACE PANEL */}
         <div className="login-form-panel" style={{
           flex: 1,
@@ -784,8 +784,8 @@ export default function Login() {
 
               <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '0.9rem' }}>
                 <span style={{ color: 'rgba(255,255,255,0.6)' }}>Already have an account? </span>
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => setIsSignup(false)}
                   style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontWeight: '600', cursor: 'pointer', textDecoration: 'underline' }}
                 >
@@ -824,7 +824,7 @@ export default function Login() {
                     Sign in to manage your wellness journey
                   </p>
 
-                    <div style={{ display: 'flex', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', marginBottom: '20px' }}>
                     <button
                       type="button"
                       onClick={() => {
@@ -1060,7 +1060,7 @@ export default function Login() {
                         >
                           {loading ? 'Requesting...' : 'Send OTP via Firebase'}
                         </button>
-                        
+
                         <div id="firebase-recaptcha-container" style={{ marginTop: '10px' }}></div>
                       </form>
                     ) : (
@@ -1212,8 +1212,8 @@ export default function Login() {
 
                   <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '0.9rem' }}>
                     <span style={{ color: 'rgba(255,255,255,0.6)' }}>New User? Pls </span>
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => setIsSignup(true)}
                       style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontWeight: '600', cursor: 'pointer', textDecoration: 'underline' }}
                     >
@@ -1448,9 +1448,9 @@ export default function Login() {
           borderRight: !isSignup ? '1px solid rgba(255, 255, 255, 0.12)' : 'none'
         }}>
           <div style={{ maxWidth: '300px' }}>
-            <img 
-              src={new URL('../assets/images/logo.png', import.meta.url).href} 
-              alt="Excel Energy Banner Logo" 
+            <img
+              src={new URL('../assets/images/logo.png', import.meta.url).href}
+              alt="Excel Energy Banner Logo"
               style={{ width: '240px', height: '240px', objectFit: 'contain', display: 'block', margin: '0 auto 24px auto' }}
             />
             <h4 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.5rem', color: '#fff', marginBottom: '12px', fontWeight: '500' }}>
